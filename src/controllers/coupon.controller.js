@@ -74,17 +74,27 @@ export async function remove(req, res, next) {
   }
 }
 
-/** POST /api/coupons/apply  body: { code, total }
- *  Trả về: { valid, discount, payable, reason }
+/** POST /api/coupons/apply
+ * body: { code, total? }
+ * Trả về:
+ *  - Không có total: { valid, coupon {...} }
+ *  - Có total: { valid, coupon {...}, discount, payable }
  */
 export async function apply(req, res, next) {
   try {
-    const { code, total } = req.body;
-    if (!code || typeof total !== 'number' || total <= 0) {
+    const { code } = req.body;
+    const hasTotal = Object.prototype.hasOwnProperty.call(req.body, 'total');
+    const total = hasTotal ? Number(req.body.total) : undefined;
+
+    if (!code) {
+      return res.status(400).json({ message: 'code là bắt buộc' });
+    }
+    if (hasTotal && (!Number.isFinite(total) || total <= 0)) {
       return res
         .status(400)
-        .json({ message: 'code và total hợp lệ là bắt buộc' });
+        .json({ message: 'total phải là số dương nếu được cung cấp' });
     }
+
     const c = await Coupon.findOne({ code: String(code).toUpperCase().trim() });
     if (!c) return res.json({ valid: false, reason: 'Mã không tồn tại' });
     if (!c.isActive) return res.json({ valid: false, reason: 'Mã đã tắt' });
@@ -94,6 +104,28 @@ export async function apply(req, res, next) {
       return res.json({ valid: false, reason: 'Chưa đến thời gian áp dụng' });
     if (c.endAt && now > c.endAt)
       return res.json({ valid: false, reason: 'Mã đã hết hạn' });
+
+    // Thông tin cơ bản của coupon
+    const baseResponse = {
+      valid: true,
+      coupon: {
+        type: c.type,
+        amount: c.amount,
+        maxDiscount: c.maxDiscount ?? null,
+        minOrder: c.minOrder ?? null,
+        startAt: c.startAt ?? null,
+        endAt: c.endAt ?? null,
+        usageLimit: c.usageLimit ?? null,
+        usedCount: c.usedCount ?? 0,
+      },
+    };
+
+    // Nếu không truyền total -> trả về thông tin coupon
+    if (!hasTotal) {
+      return res.json(baseResponse);
+    }
+
+    // Có total thì áp dụng các điều kiện liên quan đơn hàng
     if (c.minOrder && total < c.minOrder)
       return res.json({ valid: false, reason: `Đơn tối thiểu ${c.minOrder}` });
     if (c.usageLimit && c.usedCount >= c.usageLimit)
@@ -108,7 +140,7 @@ export async function apply(req, res, next) {
     }
     if (discount > total) discount = total;
 
-    res.json({ valid: true, discount, payable: total - discount });
+    return res.json({ ...baseResponse, discount, payable: total - discount });
   } catch (e) {
     next(e);
   }
