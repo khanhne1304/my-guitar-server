@@ -6,8 +6,8 @@ import {
   getBySlug,
   update,
   remove,
-  validateCreate,
 } from '../controllers/brand.controller.js';
+import { validateCreate } from '../validators/brand.validator.js';
 
 const router = Router();
 
