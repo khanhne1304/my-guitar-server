@@ -7,15 +7,15 @@ import {
   update,
   remove,
   apply,
-  validateCreate,
 } from '../controllers/coupon.controller.js';
+import { validateCreate } from '../validators/coupon.validator.js';
 
 const router = Router();
 
-// Public: kiểm tra / áp mã
+// Public
 router.post('/apply', apply);
 
-// Admin CRUD
+// Admin
 router.get('/', protect, admin, list);
 router.post('/', protect, admin, validateCreate, create);
 router.get('/:code', protect, admin, getByCode);

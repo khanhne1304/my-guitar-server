@@ -6,8 +6,8 @@ import {
   updateCartItem,
   removeCartItem,
   clearCart,
-  validateAddToCart,
 } from '../controllers/cart.controller.js';
+import { validateAddToCart } from '../validators/cart.validator.js';
 
 const router = Router();
 

@@ -1,13 +1,16 @@
-import { body, validationResult } from 'express-validator';
-import Brand from '../models/Brand.js';
-
-export const validateCreate = [
-  body('name').notEmpty().withMessage('name required'),
-];
+import { validationResult } from 'express-validator';
+import {
+  listBrands,
+  createBrand,
+  getBrandBySlug,
+  updateBrand,
+  deleteBrand,
+} from '../services/brand.service.js';
 
 export async function list(req, res, next) {
   try {
-    res.json(await Brand.find().sort('name'));
+    const brands = await listBrands();
+    res.json(brands);
   } catch (e) {
     next(e);
   }
@@ -18,11 +21,9 @@ export async function create(req, res, next) {
     const errors = validationResult(req);
     if (!errors.isEmpty())
       return res.status(400).json({ errors: errors.array() });
-    const b = await Brand.create({
-      name: req.body.name,
-      country: req.body.country || '',
-    });
-    res.status(201).json(b);
+
+    const brand = await createBrand(req.body);
+    res.status(201).json(brand);
   } catch (e) {
     next(e);
   }
@@ -30,9 +31,9 @@ export async function create(req, res, next) {
 
 export async function getBySlug(req, res, next) {
   try {
-    const b = await Brand.findOne({ slug: req.params.slug });
-    if (!b) return res.status(404).json({ message: 'Không tìm thấy' });
-    res.json(b);
+    const brand = await getBrandBySlug(req.params.slug);
+    if (!brand) return res.status(404).json({ message: 'Không tìm thấy' });
+    res.json(brand);
   } catch (e) {
     next(e);
   }
@@ -40,11 +41,9 @@ export async function getBySlug(req, res, next) {
 
 export async function update(req, res, next) {
   try {
-    const b = await Brand.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-    });
-    if (!b) return res.status(404).json({ message: 'Không tìm thấy' });
-    res.json(b);
+    const brand = await updateBrand(req.params.id, req.body);
+    if (!brand) return res.status(404).json({ message: 'Không tìm thấy' });
+    res.json(brand);
   } catch (e) {
     next(e);
   }
@@ -52,8 +51,8 @@ export async function update(req, res, next) {
 
 export async function remove(req, res, next) {
   try {
-    const b = await Brand.findByIdAndDelete(req.params.id);
-    if (!b) return res.status(404).json({ message: 'Không tìm thấy' });
+    const brand = await deleteBrand(req.params.id);
+    if (!brand) return res.status(404).json({ message: 'Không tìm thấy' });
     res.json({ message: 'Đã xoá' });
   } catch (e) {
     next(e);

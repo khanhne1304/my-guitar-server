@@ -6,13 +6,13 @@ import {
   adminListOrders,
   payOrder,
 } from '../controllers/order.controller.js';
+import { validateCreateOrder } from '../validators/order.validator.js';
 
 const router = Router();
 
-router.post('/', protect, createOrderFromCart);
+router.post('/', protect, validateCreateOrder, createOrderFromCart);
 router.get('/mine', protect, myOrders);
 router.get('/', protect, admin, adminListOrders);
 router.post('/:id/pay', protect, payOrder);
-
 
 export default router;
