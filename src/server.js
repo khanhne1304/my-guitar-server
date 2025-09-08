@@ -17,15 +17,21 @@ const allowList = (process.env.CORS_ORIGIN || '')
   .filter(Boolean);
 
 // Cho phép nhiều origin, và cả request không có Origin (Postman/cURL)
+const DEV_DEFAULTS = ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:5173', 'http://127.0.0.1:5173'];
+const effectiveAllowList = allowList.length ? allowList : DEV_DEFAULTS;
+const isDev = process.env.NODE_ENV !== 'production';
+
 const corsOptions = {
   origin(origin, callback) {
-    if (!origin) return callback(null, true);
-    if (allowList.includes(origin)) return callback(null, true);
+    if (isDev) return callback(null, true);
+    if (!origin) return callback(null, true); // Postman/cURL
+    if (effectiveAllowList.includes(origin)) return callback(null, true);
     return callback(new Error(`CORS blocked: ${origin}`), false);
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true, // bật nếu dùng cookie/session
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control', 'Pragma'],
+  credentials: true,
+  optionsSuccessStatus: 204,
 };
 
 // security & utils
@@ -42,6 +48,13 @@ app.options('*', cors(corsOptions));
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(cookieParser());
+// Tắt ETag để tránh 304 Not Modified và luôn trả body
+app.disable('etag');
+// Ép no-store cho toàn bộ API JSON
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
 
 /** --------- ROUTES --------- **/
 import authRoutes from './routes/auth.routes.js';

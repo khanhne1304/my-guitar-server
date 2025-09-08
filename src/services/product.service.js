@@ -1,10 +1,26 @@
 import Product from '../models/Product.js';
+import Category from '../models/Category.js';
+import Brand from '../models/Brand.js';
 import APIFeatures from '../utils/apiFeatures.js';
 
 export async function listProductsService(query) {
+  const q = { ...query };
+
+  // Hỗ trợ filter theo slug tiện cho client
+  if (q.categorySlug) {
+    const cat = await Category.findOne({ slug: q.categorySlug }).select('_id');
+    if (cat) q.category = cat._id;
+    delete q.categorySlug;
+  }
+  if (q.brandSlug) {
+    const br = await Brand.findOne({ slug: q.brandSlug }).select('_id');
+    if (br) q.brand = br._id;
+    delete q.brandSlug;
+  }
+
   const features = new APIFeatures(
     Product.find({ isActive: true }).populate('brand category', 'name slug'),
-    query
+    q
   )
     .filter()
     .search()

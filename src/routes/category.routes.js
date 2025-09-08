@@ -6,12 +6,15 @@ import {
   getBySlug,
   update,
   remove,
+  getBrandsByCategory,
 } from '../controllers/category.controller.js';
 import { validateCreate } from '../validators/category.validator.js';
 
 const router = Router();
 
 router.get('/', list);
+// Đặt route cụ thể trước route động để tránh nuốt đường dẫn
+router.get('/:slug/brands', getBrandsByCategory);
 router.get('/:slug', getBySlug);
 
 router.post('/', protect, admin, validateCreate, create);
