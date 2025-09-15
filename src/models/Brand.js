@@ -6,12 +6,23 @@ const schema = new mongoose.Schema(
     name: { type: String, required: true, unique: true, trim: true },
     slug: { type: String, unique: true, index: true },
     country: { type: String, trim: true },
+
+    // Tham chiếu Category qua slug
+    categories: [
+      {
+        type: String,
+        ref: 'Category',
+      },
+    ],
   },
   { timestamps: true },
 );
 
+// Tự sinh slug cho Brand
 schema.pre('save', function (next) {
-  if (this.isModified('name')) this.slug = slugify(this.name, { lower: true });
+  if (this.isModified('name')) {
+    this.slug = slugify(this.name, { lower: true });
+  }
   next();
 });
 

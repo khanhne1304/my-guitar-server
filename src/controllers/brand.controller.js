@@ -5,8 +5,10 @@ import {
   getBrandBySlug,
   updateBrand,
   deleteBrand,
+  listBrandsByCategorySlug, // ✅ thêm service
 } from '../services/brand.service.js';
 
+// Lấy tất cả brands
 export async function list(req, res, next) {
   try {
     const brands = await listBrands();
@@ -16,6 +18,7 @@ export async function list(req, res, next) {
   }
 }
 
+// Tạo brand mới
 export async function create(req, res, next) {
   try {
     const errors = validationResult(req);
@@ -29,6 +32,7 @@ export async function create(req, res, next) {
   }
 }
 
+// Lấy brand theo slug
 export async function getBySlug(req, res, next) {
   try {
     const brand = await getBrandBySlug(req.params.slug);
@@ -39,6 +43,18 @@ export async function getBySlug(req, res, next) {
   }
 }
 
+// ✅ Lấy danh sách brand theo slug category
+export async function listByCategorySlug(req, res, next) {
+  try {
+    const { slug } = req.params;
+    const brands = await listBrandsByCategorySlug(slug);
+    res.json(brands);
+  } catch (e) {
+    next(e);
+  }
+}
+
+// Cập nhật brand
 export async function update(req, res, next) {
   try {
     const brand = await updateBrand(req.params.id, req.body);
@@ -49,6 +65,7 @@ export async function update(req, res, next) {
   }
 }
 
+// Xoá brand
 export async function remove(req, res, next) {
   try {
     const brand = await deleteBrand(req.params.id);

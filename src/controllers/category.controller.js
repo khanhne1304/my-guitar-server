@@ -5,6 +5,7 @@ import {
   getCategoryBySlug,
   updateCategory,
   deleteCategory,
+  listBrandsByCategorySlug,
 } from '../services/category.service.js';
 
 export async function list(req, res, next) {
@@ -54,6 +55,15 @@ export async function remove(req, res, next) {
     const category = await deleteCategory(req.params.id);
     if (!category) return res.status(404).json({ message: 'Không tìm thấy' });
     res.json({ message: 'Đã xoá' });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function getBrandsByCategory(req, res, next) {
+  try {
+    const brands = await listBrandsByCategorySlug(req.params.slug);
+    res.json(brands);
   } catch (e) {
     next(e);
   }
