@@ -9,7 +9,6 @@ import {
   listProductsByCategoryAndBrandService,
 } from '../services/product.service.js';
 
-// Lấy tất cả sản phẩm (có hỗ trợ query filter)
 export async function listProducts(req, res, next) {
   try {
     const products = await listProductsService(req.query);
