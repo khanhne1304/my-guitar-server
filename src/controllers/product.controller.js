@@ -5,8 +5,11 @@ import {
   createProductService,
   updateProductService,
   deleteProductService,
+  listProductsByCategoryService,
+  listProductsByCategoryAndBrandService,
 } from '../services/product.service.js';
 
+// Lấy tất cả sản phẩm (có hỗ trợ query filter)
 export async function listProducts(req, res, next) {
   try {
     const products = await listProductsService(req.query);
@@ -59,6 +62,29 @@ export async function deleteProduct(req, res, next) {
     const removed = await deleteProductService(req.params.id);
     if (!removed) return res.status(404).json({ message: 'Không tìm thấy' });
     res.json({ message: 'Đã vô hiệu hoá', product: removed });
+  } catch (e) {
+    next(e);
+  }
+}
+
+// Lấy sản phẩm theo category
+export async function listByCategory(req, res, next) {
+  try {
+    const products = await listProductsByCategoryService(req.params.slug);
+    res.json(products);
+  } catch (e) {
+    next(e);
+  }
+}
+
+// Lấy sản phẩm theo category + brand
+export async function listByCategoryAndBrand(req, res, next) {
+  try {
+    const products = await listProductsByCategoryAndBrandService(
+      req.params.categorySlug,
+      req.params.brandSlug
+    );
+    res.json(products);
   } catch (e) {
     next(e);
   }

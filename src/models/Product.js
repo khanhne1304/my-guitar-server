@@ -24,13 +24,9 @@ const productSchema = new mongoose.Schema(
       type: {
         type: String,
         enum: [
-          'acoustic',
-          'electric',
-          'classical',
-          'bass',
-          'ukulele',
+          'guitar',
           'piano',
-          'other',
+  
         ],
         default: 'acoustic',
       },

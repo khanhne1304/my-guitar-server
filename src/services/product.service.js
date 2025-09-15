@@ -6,7 +6,6 @@ import APIFeatures from '../utils/apiFeatures.js';
 export async function listProductsService(query) {
   const q = { ...query };
 
-  // Hỗ trợ filter theo slug tiện cho client
   if (q.categorySlug) {
     const cat = await Category.findOne({ slug: q.categorySlug }).select('_id');
     if (cat) q.category = cat._id;
@@ -48,4 +47,28 @@ export async function updateProductService(id, data) {
 
 export async function deleteProductService(id) {
   return await Product.findByIdAndUpdate(id, { isActive: false }, { new: true });
+}
+
+// =================== BỔ SUNG ===================
+
+// Lấy sản phẩm theo category
+export async function listProductsByCategoryService(categorySlug) {
+  const category = await Category.findOne({ slug: categorySlug }).select('_id');
+  if (!category) return [];
+  return await Product.find({ category: category._id, isActive: true }).populate(
+    'brand category',
+    'name slug'
+  );
+}
+
+// Lấy sản phẩm theo category + brand
+export async function listProductsByCategoryAndBrandService(categorySlug, brandSlug) {
+  const category = await Category.findOne({ slug: categorySlug }).select('_id');
+  const brand = await Brand.findOne({ slug: brandSlug }).select('_id');
+  if (!category || !brand) return [];
+  return await Product.find({
+    category: category._id,
+    brand: brand._id,
+    isActive: true,
+  }).populate('brand category', 'name slug');
 }

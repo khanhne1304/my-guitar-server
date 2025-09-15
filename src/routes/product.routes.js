@@ -6,6 +6,8 @@ import {
   createProduct,
   updateProduct,
   deleteProduct,
+  listByCategory,
+  listByCategoryAndBrand,
 } from '../controllers/product.controller.js';
 import {
   validateProductCreate,
@@ -17,6 +19,12 @@ const router = Router();
 // Public
 router.get('/', listProducts);
 router.get('/:slug', getProductBySlug);
+
+// Theo category
+router.get('/category/:slug', listByCategory);
+
+// Theo category + brand
+router.get('/category/:categorySlug/brand/:brandSlug', listByCategoryAndBrand);
 
 // Admin
 router.post('/', protect, admin, validateProductCreate, createProduct);
