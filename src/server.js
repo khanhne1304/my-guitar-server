@@ -65,6 +65,7 @@ import categoryRoutes from './routes/category.routes.js';
 import brandRoutes from './routes/brand.routes.js';
 import couponRoutes from './routes/coupon.routes.js';
 import reviewRoutes from './routes/review.routes.js';
+import songRoutes from './routes/song.routes.js';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
@@ -74,6 +75,7 @@ app.use('/api/categories', categoryRoutes);
 app.use('/api/brands', brandRoutes);
 app.use('/api/coupons', couponRoutes);
 app.use('/api/reviews', reviewRoutes);
+app.use('/api/songs', songRoutes);
 
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
