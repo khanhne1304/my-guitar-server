@@ -6,10 +6,14 @@ import {
   getBySlug,
   update,
   remove,
+  listByCategorySlug, // ✅ controller mới
 } from '../controllers/brand.controller.js';
 import { validateCreate } from '../validators/brand.validator.js';
 
 const router = Router();
+
+// Lấy brand theo category slug
+router.get('/category/:slug', listByCategorySlug);
 
 router.get('/', list);
 router.get('/:slug', getBySlug);

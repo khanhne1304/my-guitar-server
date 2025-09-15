@@ -19,3 +19,8 @@ export async function updateBrand(id, data) {
 export async function deleteBrand(id) {
   return await Brand.findByIdAndDelete(id);
 }
+
+// 🔥 Lấy danh sách Brand theo slug của Category
+export async function listBrandsByCategorySlug(categorySlug) {
+  return await Brand.find({ categories: categorySlug }).sort('name');
+}
