@@ -15,7 +15,8 @@ export async function createOrderFromCart(req, res, next) {
     const order = await createOrderFromCartService(
       req.user.id,
       req.body.shippingAddress,
-      req.body.paymentMethod
+      req.body.paymentMethod,
+      req.body.items
     );
 
     res.status(201).json(order);

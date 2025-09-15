@@ -11,6 +11,7 @@ import { validateCreateOrder } from '../validators/order.validator.js';
 const router = Router();
 
 router.post('/', protect, validateCreateOrder, createOrderFromCart);
+router.post('/checkout', protect, validateCreateOrder, createOrderFromCart);
 router.get('/mine', protect, myOrders);
 router.get('/', protect, admin, adminListOrders);
 router.post('/:id/pay', protect, payOrder);
