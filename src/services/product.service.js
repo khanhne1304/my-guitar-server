@@ -1,12 +1,15 @@
 import Product from '../models/Product.js';
-import Category from '../models/Category.js';
+import {
+  getCategoryBySlug,
+  listBrandsByCategorySlug, // nếu cần reuse
+} from './category.service.js';
 import Brand from '../models/Brand.js';
 
 /**
  * Lấy danh sách sản phẩm với filter nâng cao + search theo q
  */
 export async function listProductsService(query) {
-  const { q, page = 1, limit = 12, sort = '-createdAt', ...filters } = query;
+  const { q, page = 1, limit = 12, sort = '-createdAt', categorySlug, brandSlug, ...filters } = query;
 
   const pipeline = [
     { $match: { isActive: true } },
@@ -48,6 +51,26 @@ export async function listProductsService(query) {
         ],
       },
     });
+  }
+
+  // Filter categorySlug
+  if (categorySlug) {
+    const category = await getCategoryBySlug(categorySlug);
+    if (category) {
+      pipeline.push({ $match: { 'category._id': category._id } });
+    } else {
+      return []; // slug sai → trả mảng rỗng
+    }
+  }
+
+  // Filter brandSlug
+  if (brandSlug) {
+    const brand = await Brand.findOne({ slug: brandSlug }).select('_id');
+    if (brand) {
+      pipeline.push({ $match: { 'brand._id': brand._id } });
+    } else {
+      return []; // slug sai → trả mảng rỗng
+    }
   }
 
   // Filter nâng cao (price, stock, ...)
@@ -96,7 +119,7 @@ export async function deleteProductService(id) {
 }
 
 export async function listProductsByCategoryService(categorySlug) {
-  const category = await Category.findOne({ slug: categorySlug }).select('_id');
+  const category = await getCategoryBySlug(categorySlug);
   if (!category) return [];
   return await Product.find({ category: category._id, isActive: true }).populate(
     'brand category',
@@ -104,12 +127,10 @@ export async function listProductsByCategoryService(categorySlug) {
   );
 }
 
-export async function listProductsByCategoryAndBrandService(
-  categorySlug,
-  brandSlug
-) {
-  const category = await Category.findOne({ slug: categorySlug }).select('_id');
+export async function listProductsByCategoryAndBrandService(categorySlug, brandSlug) {
+  const category = await getCategoryBySlug(categorySlug);
   const brand = await Brand.findOne({ slug: brandSlug }).select('_id');
+
   if (!category || !brand) return [];
   return await Product.find({
     category: category._id,
