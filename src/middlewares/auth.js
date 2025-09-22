@@ -1,14 +1,17 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 
-export function protect(req, res, next) {
+export async function protect(req, res, next) {
   try {
     const header = req.headers.authorization || '';
     const token = header.startsWith('Bearer ') ? header.split(' ')[1] : null;
     if (!token) return res.status(401).json({ message: 'Unauthorized' });
 
     const payload = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = payload;
+    const user = await User.findById(payload.id).select('-password');
+    if (!user) return res.status(401).json({ message: 'Unauthorized' });
+
+    req.user = user;
     next();
   } catch {
     res.status(401).json({ message: 'Invalid token' });
@@ -16,8 +19,8 @@ export function protect(req, res, next) {
 }
 
 export async function admin(req, res, next) {
-  const user = await User.findById(req.user?.id);
-  if (user?.role !== 'admin')
+  if (req.user?.role !== 'admin') {
     return res.status(403).json({ message: 'Forbidden' });
+  }
   next();
 }
