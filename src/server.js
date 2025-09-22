@@ -6,7 +6,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import { connectDB } from './config/db.js';
-
+import favoriteRoutes from './routes/favorite.routes.js';
 dotenv.config();
 const app = express();
 
@@ -44,7 +44,7 @@ app.use(
 app.use(cors(corsOptions));
 // xử lý preflight cho mọi route
 app.options('*', cors(corsOptions));
-
+app.use('/api/favorites', favoriteRoutes); 
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(cookieParser());
