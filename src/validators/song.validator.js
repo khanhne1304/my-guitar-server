@@ -6,6 +6,8 @@ export const validateSongCreate = [
   body('artists').optional().isArray().withMessage('artists must be array of strings'),
   body('postedAt').optional().isISO8601().toDate(),
   body('views').optional().isInt({ min: 0 }),
+  body('tempo').optional().isInt({ min: 30, max: 300 }),
+  body('timeSignature').optional().matches(/^\d+\/\d+$/),
 ];
 
 export const validateSongUpdate = [
@@ -14,6 +16,8 @@ export const validateSongUpdate = [
   body('artists').optional().isArray(),
   body('postedAt').optional().isISO8601().toDate(),
   body('views').optional().isInt({ min: 0 }),
+  body('tempo').optional().isInt({ min: 30, max: 300 }),
+  body('timeSignature').optional().matches(/^\d+\/\d+$/),
 ];
 
 
