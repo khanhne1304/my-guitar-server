@@ -19,8 +19,8 @@ const commonValidationRules = [
     .trim()
     .notEmpty()
     .withMessage('Địa chỉ cụ thể không được để trống')
-    .isLength({ min: 10, max: 200 })
-    .withMessage('Địa chỉ cụ thể phải có từ 10-200 ký tự'),
+    .isLength({ min: 5, max: 200 })
+    .withMessage('Địa chỉ cụ thể phải có từ 5-200 ký tự'),
 
   body('city')
     .trim()
