@@ -44,6 +44,35 @@ export async function updateOrderStatus(req, res, next) {
       return res.status(400).json({ message: 'Trạng thái không hợp lệ' });
     }
 
+    // Ràng buộc admin:
+    // - Không được cancel nếu đơn đã ở trạng thái paid hoặc shipped hoặc completed
+    if (status === 'cancelled') {
+      if (['paid', 'shipped', 'completed'].includes(order.status)) {
+        return res.status(400).json({ message: 'Không thể hủy đơn đã thanh toán hoặc đang/đã giao' });
+      }
+    }
+
+    // - Trạng thái completed chỉ được chuyển từ shipped
+    if (status === 'completed') {
+      if (order.status !== 'shipped') {
+        return res.status(400).json({ message: 'Chỉ có thể hoàn tất đơn từ trạng thái shipped' });
+      }
+    }
+
+    // - Cho phép chuyển từ pending -> paid, paid -> shipped
+    // - Ngăn các chuyển trạng thái ngược không hợp lệ
+    const current = order.status;
+    const allowedTransitions = {
+      pending: new Set(['paid', 'cancelled']),
+      paid: new Set(['shipped']),
+      shipped: new Set(['completed']),
+      completed: new Set([]),
+      cancelled: new Set([]),
+    };
+    if (!allowedTransitions[current].has(status)) {
+      return res.status(400).json({ message: `Không thể chuyển từ ${current} sang ${status}` });
+    }
+
     order.status = status;
     if (status === 'paid' && !order.paidAt) {
       order.paidAt = new Date(); // tự động ghi thời điểm thanh toán
