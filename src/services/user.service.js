@@ -6,18 +6,23 @@ export async function getUserProfile(userId) {
 }
 
 export async function updateUserProfile(userId, data) {
-  const user = await User.findById(userId).select('+password');
-  if (!user) throw new Error('NOT_FOUND');
+  // Loại bỏ password ngay từ đầu nếu có trong data
+  if ('password' in data) delete data.password;
 
-  const { username, email, fullName, address, phone, password } = data;
+  // Chỉ lấy những field được phép sửa
+  const allowedFields = ['username', 'email', 'fullName', 'address', 'phone'];
+  const updates = {};
+  for (const key of allowedFields) {
+    if (data[key] !== undefined) updates[key] = data[key];
+  }
 
-  if (username) user.username = username;
-  if (email) user.email = email;
-  if (fullName) user.fullName = fullName;
-  if (address) user.address = address;
-  if (phone) user.phone = phone;
-  if (password) user.password = await bcrypt.hash(password, 10);
+  // Dùng findByIdAndUpdate để tránh trigger pre-save hook của password
+  const updatedUser = await User.findByIdAndUpdate(
+    userId,
+    { $set: updates },
+    { new: true, runValidators: true, context: 'query' }
+  ).select('-password'); // luôn loại password khi trả về
 
-  await user.save();
-  return user;
+  if (!updatedUser) throw new Error('NOT_FOUND');
+  return updatedUser;
 }
