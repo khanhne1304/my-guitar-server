@@ -19,9 +19,11 @@ export async function changePassword(req, res, next) {
     if (!user) return res.status(404).json({ message: "User not found" });
 
     const isMatch = await bcrypt.compare(currentPassword, user.password);
-    if (!isMatch) return res.status(400).json({ message: "Mật khẩu hiện tại không đúng" });
+    if (!isMatch)
+      return res.status(400).json({ message: "Mật khẩu hiện tại không đúng" });
 
-    user.password = await bcrypt.hash(newPassword, 10);
+    // ❌ Đừng hash ở đây → để pre-save tự hash
+    user.password = newPassword;
     await user.save();
 
     res.json({ message: "Đổi mật khẩu thành công" });
