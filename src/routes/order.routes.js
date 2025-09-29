@@ -5,6 +5,7 @@ import {
   myOrders,
   adminListOrders,
   payOrder,
+  updateOrderStatus,
 } from '../controllers/order.controller.js';
 import { validateCreateOrder } from '../validators/order.validator.js';
 
@@ -15,5 +16,6 @@ router.post('/checkout', protect, validateCreateOrder, createOrderFromCart);
 router.get('/mine', protect, myOrders);
 router.get('/', protect, admin, adminListOrders);
 router.post('/:id/pay', protect, payOrder);
+router.put('/:id', protect, admin, updateOrderStatus);
 
 export default router;

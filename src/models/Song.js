@@ -25,6 +25,8 @@ const songSchema = new mongoose.Schema(
     lyrics: { type: String, required: true },
     ratings: { type: [ratingSchema], default: [] },
     isActive: { type: Boolean, default: true },
+    tempo: { type: Number, default: 90 }, // BPM (beats per minute)
+    timeSignature: { type: String, default: "4/4" }, // "4/4", "3/4", "6/8"
   },
   { timestamps: true },
 );
