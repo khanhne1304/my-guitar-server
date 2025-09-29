@@ -1,4 +1,5 @@
 import { validationResult } from 'express-validator';
+import Order from '../models/Order.js';
 import {
   createOrderFromCartService,
   getUserOrders,
@@ -31,6 +32,29 @@ export async function createOrderFromCart(req, res, next) {
   }
 }
 
+export async function updateOrderStatus(req, res, next) {
+  try {
+    const { status } = req.body;
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ message: 'Không tìm thấy đơn hàng' });
+
+    // Chỉ cập nhật nếu status hợp lệ
+    const allowedStatuses = ['pending', 'paid', 'shipped', 'completed', 'cancelled'];
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({ message: 'Trạng thái không hợp lệ' });
+    }
+
+    order.status = status;
+    if (status === 'paid' && !order.paidAt) {
+      order.paidAt = new Date(); // tự động ghi thời điểm thanh toán
+    }
+    await order.save();
+
+    res.json({ message: 'Đã cập nhật trạng thái', order });
+  } catch (e) {
+    next(e);
+  }
+}
 export async function myOrders(req, res, next) {
   try {
     const orders = await getUserOrders(req.user.id);
