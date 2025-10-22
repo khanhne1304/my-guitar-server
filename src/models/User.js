@@ -13,7 +13,7 @@ const userSchema = new mongoose.Schema(
     },
     fullName: { type: String, trim: true },
     address: { type: String },
-    phone: { type: String },
+    phone: { type: String, unique: true, sparse: true },
     password: { type: String, required: true, select: false },
     role: { type: String, enum: ['user', 'admin'], default: 'user' },
   },

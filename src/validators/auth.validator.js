@@ -24,7 +24,8 @@ export const validateRegister = [
     .isLength({ max: 200 })
     .withMessage('address quá dài'),
   body('phone')
-    .optional()
+    .notEmpty()
+    .withMessage('Số điện thoại là bắt buộc')
     .matches(/^[0-9+()\s-]{8,20}$/)
     .withMessage('Số điện thoại không hợp lệ'),
 ];
