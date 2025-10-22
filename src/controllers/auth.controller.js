@@ -22,8 +22,40 @@ export async function register(req, res, next) {
       },
     });
   } catch (e) {
-    if (e.message === 'USER_EXISTS') {
-      return res.status(409).json({ message: 'Username hoặc Email đã tồn tại' });
+    if (e.message === 'DUPLICATE_FIELDS') {
+      const conflicts = e.conflicts || [];
+      let message = '';
+      
+      if (conflicts.length === 1) {
+        const field = conflicts[0];
+        switch (field) {
+          case 'username':
+            message = 'Tên tài khoản đã tồn tại';
+            break;
+          case 'email':
+            message = 'Email đã tồn tại';
+            break;
+          case 'phone':
+            message = 'Số điện thoại đã tồn tại';
+            break;
+          default:
+            message = 'Thông tin đã tồn tại';
+        }
+      } else if (conflicts.length > 1) {
+        const fieldNames = conflicts.map(field => {
+          switch (field) {
+            case 'username': return 'Tên tài khoản';
+            case 'email': return 'Email';
+            case 'phone': return 'Số điện thoại';
+            default: return field;
+          }
+        });
+        message = `${fieldNames.join(', ')} đã tồn tại`;
+      } else {
+        message = 'Thông tin đã tồn tại';
+      }
+      
+      return res.status(409).json({ message });
     }
     if (e?.code === 11000) {
       const field = Object.keys(e.keyPattern || {})[0] || 'field';
