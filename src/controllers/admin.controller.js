@@ -1,4 +1,8 @@
 import User from '../models/User.js';
+import Review from '../models/Review.js';
+import Coupon from '../models/Coupon.js';
+import Notification from '../models/Notification.js';
+import Product from '../models/Product.js';
 import bcrypt from 'bcrypt';
 
 // Lấy danh sách tất cả users (có phân trang)
@@ -228,6 +232,374 @@ export async function getUserStats(req, res, next) {
       totalRegularUsers,
       newUsersLast30Days
     });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// ==================== REVIEW MANAGEMENT ====================
+
+// Lấy danh sách tất cả reviews (có phân trang)
+export async function getAllReviews(req, res, next) {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const search = req.query.search || '';
+    const rating = req.query.rating || '';
+
+    const skip = (page - 1) * limit;
+
+    // Tạo filter object
+    const filter = {};
+    if (search) {
+      filter.$or = [
+        { comment: { $regex: search, $options: 'i' } }
+      ];
+    }
+    if (rating) {
+      filter.rating = parseInt(rating);
+    }
+
+    const reviews = await Review.find(filter)
+      .populate('user', 'username fullName email')
+      .populate('product', 'name slug')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const total = await Review.countDocuments(filter);
+    const totalPages = Math.ceil(total / limit);
+
+    res.json({
+      reviews,
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalReviews: total,
+        hasNext: page < totalPages,
+        hasPrev: page > 1
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Xóa review
+export async function deleteReview(req, res, next) {
+  try {
+    const { id } = req.params;
+    const review = await Review.findByIdAndDelete(id);
+    
+    if (!review) {
+      return res.status(404).json({ message: 'Review not found' });
+    }
+
+    res.json({ message: 'Xóa review thành công' });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// ==================== COUPON MANAGEMENT ====================
+
+// Lấy danh sách tất cả coupons (có phân trang)
+export async function getAllCoupons(req, res, next) {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const search = req.query.search || '';
+    const status = req.query.status || '';
+
+    const skip = (page - 1) * limit;
+
+    // Tạo filter object
+    const filter = {};
+    if (search) {
+      filter.code = { $regex: search, $options: 'i' };
+    }
+    if (status === 'active') {
+      filter.isActive = true;
+      filter.$or = [
+        { endAt: { $exists: false } },
+        { endAt: { $gt: new Date() } }
+      ];
+    } else if (status === 'expired') {
+      filter.endAt = { $lt: new Date() };
+    } else if (status === 'inactive') {
+      filter.isActive = false;
+    }
+
+    const coupons = await Coupon.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const total = await Coupon.countDocuments(filter);
+    const totalPages = Math.ceil(total / limit);
+
+    res.json({
+      coupons,
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalCoupons: total,
+        hasNext: page < totalPages,
+        hasPrev: page > 1
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Tạo coupon mới
+export async function createCoupon(req, res, next) {
+  try {
+    const {
+      code,
+      type,
+      amount,
+      maxDiscount,
+      minOrder,
+      startAt,
+      endAt,
+      usageLimit,
+      isActive
+    } = req.body;
+
+    // Kiểm tra code đã tồn tại
+    const existingCoupon = await Coupon.findOne({ code: code.toUpperCase() });
+    if (existingCoupon) {
+      return res.status(400).json({ message: 'Mã khuyến mãi đã tồn tại' });
+    }
+
+    const coupon = new Coupon({
+      code: code.toUpperCase(),
+      type,
+      amount,
+      maxDiscount: maxDiscount || 0,
+      minOrder: minOrder || 0,
+      startAt: startAt ? new Date(startAt) : new Date(),
+      endAt: endAt ? new Date(endAt) : null,
+      usageLimit: usageLimit || 0,
+      isActive: isActive !== undefined ? isActive : true
+    });
+
+    await coupon.save();
+    res.status(201).json(coupon);
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({ message: errors.join(', ') });
+    }
+    next(error);
+  }
+}
+
+// Cập nhật coupon
+export async function updateCoupon(req, res, next) {
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
+
+    // Nếu có code mới, kiểm tra trùng lặp
+    if (updateData.code) {
+      const existingCoupon = await Coupon.findOne({ 
+        code: updateData.code.toUpperCase(),
+        _id: { $ne: id }
+      });
+      if (existingCoupon) {
+        return res.status(400).json({ message: 'Mã khuyến mãi đã tồn tại' });
+      }
+      updateData.code = updateData.code.toUpperCase();
+    }
+
+    // Convert date strings to Date objects
+    if (updateData.startAt) updateData.startAt = new Date(updateData.startAt);
+    if (updateData.endAt) updateData.endAt = new Date(updateData.endAt);
+
+    const coupon = await Coupon.findByIdAndUpdate(
+      id,
+      updateData,
+      { new: true, runValidators: true }
+    );
+
+    if (!coupon) {
+      return res.status(404).json({ message: 'Coupon not found' });
+    }
+
+    res.json(coupon);
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({ message: errors.join(', ') });
+    }
+    next(error);
+  }
+}
+
+// Xóa coupon
+export async function deleteCoupon(req, res, next) {
+  try {
+    const { id } = req.params;
+    const coupon = await Coupon.findByIdAndDelete(id);
+    
+    if (!coupon) {
+      return res.status(404).json({ message: 'Coupon not found' });
+    }
+
+    res.json({ message: 'Xóa coupon thành công' });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// ==================== NOTIFICATION MANAGEMENT ====================
+
+// Lấy danh sách tất cả notifications (có phân trang)
+export async function getAllNotifications(req, res, next) {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const search = req.query.search || '';
+    const type = req.query.type || '';
+    const status = req.query.status || '';
+
+    const skip = (page - 1) * limit;
+
+    // Tạo filter object
+    const filter = {};
+    if (search) {
+      filter.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { content: { $regex: search, $options: 'i' } }
+      ];
+    }
+    if (type) {
+      filter.type = type;
+    }
+    if (status === 'active') {
+      filter.isActive = true;
+      filter.$or = [
+        { expiresAt: { $exists: false } },
+        { expiresAt: { $gt: new Date() } }
+      ];
+    } else if (status === 'expired') {
+      filter.expiresAt = { $lt: new Date() };
+    } else if (status === 'inactive') {
+      filter.isActive = false;
+    }
+
+    const notifications = await Notification.find(filter)
+      .populate('targetUsers', 'username fullName email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const total = await Notification.countDocuments(filter);
+    const totalPages = Math.ceil(total / limit);
+
+    res.json({
+      notifications,
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalNotifications: total,
+        hasNext: page < totalPages,
+        hasPrev: page > 1
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Tạo notification mới
+export async function createNotification(req, res, next) {
+  try {
+    const {
+      title,
+      content,
+      type,
+      priority,
+      targetAudience,
+      targetUsers,
+      isActive,
+      scheduledAt,
+      expiresAt,
+      imageUrl,
+      actionUrl,
+      actionText
+    } = req.body;
+
+    const notification = new Notification({
+      title,
+      content,
+      type: type || 'general',
+      priority: priority || 'medium',
+      targetAudience: targetAudience || 'all',
+      targetUsers: targetUsers || [],
+      isActive: isActive !== undefined ? isActive : true,
+      scheduledAt: scheduledAt ? new Date(scheduledAt) : new Date(),
+      expiresAt: expiresAt ? new Date(expiresAt) : null,
+      imageUrl,
+      actionUrl,
+      actionText
+    });
+
+    await notification.save();
+    res.status(201).json(notification);
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({ message: errors.join(', ') });
+    }
+    next(error);
+  }
+}
+
+// Cập nhật notification
+export async function updateNotification(req, res, next) {
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
+
+    // Convert date strings to Date objects
+    if (updateData.scheduledAt) updateData.scheduledAt = new Date(updateData.scheduledAt);
+    if (updateData.expiresAt) updateData.expiresAt = new Date(updateData.expiresAt);
+
+    const notification = await Notification.findByIdAndUpdate(
+      id,
+      updateData,
+      { new: true, runValidators: true }
+    ).populate('targetUsers', 'username fullName email');
+
+    if (!notification) {
+      return res.status(404).json({ message: 'Notification not found' });
+    }
+
+    res.json(notification);
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({ message: errors.join(', ') });
+    }
+    next(error);
+  }
+}
+
+// Xóa notification
+export async function deleteNotification(req, res, next) {
+  try {
+    const { id } = req.params;
+    const notification = await Notification.findByIdAndDelete(id);
+    
+    if (!notification) {
+      return res.status(404).json({ message: 'Notification not found' });
+    }
+
+    res.json({ message: 'Xóa thông báo thành công' });
   } catch (error) {
     next(error);
   }

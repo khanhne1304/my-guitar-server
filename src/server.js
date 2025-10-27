@@ -71,6 +71,7 @@ import songRoutes from './routes/song.routes.js';
 import addressRoutes from './routes/address.routes.js';
 import courseRoutes from './routes/course.routes.js';
 import adminRoutes from './routes/admin.routes.js';
+import notificationRoutes from './routes/notification.routes.js';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
@@ -84,6 +85,7 @@ app.use('/api/songs', songRoutes);
 app.use('/api/addresses', addressRoutes);
 app.use('/api/courses', courseRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
