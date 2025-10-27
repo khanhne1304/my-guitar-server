@@ -10,8 +10,21 @@ function signToken(user) {
 }
 
 export async function registerUser({ username, email, fullName, address, phone, password }) {
-  const existed = await User.findOne({ $or: [{ username }, { email }] }).lean();
-  if (existed) throw new Error('USER_EXISTS');
+  // Kiểm tra từng trường riêng biệt để có thông báo lỗi chi tiết
+  const existingUsername = await User.findOne({ username }).lean();
+  const existingEmail = await User.findOne({ email }).lean();
+  const existingPhone = await User.findOne({ phone }).lean();
+  
+  const conflicts = [];
+  if (existingUsername) conflicts.push('username');
+  if (existingEmail) conflicts.push('email');
+  if (existingPhone) conflicts.push('phone');
+  
+  if (conflicts.length > 0) {
+    const error = new Error('DUPLICATE_FIELDS');
+    error.conflicts = conflicts;
+    throw error;
+  }
 
   const user = await User.create({
     username,
