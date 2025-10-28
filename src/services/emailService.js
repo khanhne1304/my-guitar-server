@@ -35,7 +35,7 @@ export async function sendOTPEmail(email, otp, type = 'reset') {
   const mailOptions = {
     from: process.env.GMAIL_USER,
     to: email,
-    subject: type === 'register' ? 'Mã OTP xác thực đăng ký - My Guitar' : 'Mã OTP đặt lại mật khẩu - My Guitar',
+    subject: type === 'register' ? 'Mã OTP xác thực đăng ký - My Guitar' : 'Xác thực đổi mật khẩu - Mã OTP từ My Guitar',
     html: type === 'register' ? getRegisterOTPHTML(otp) : getResetPasswordOTPHTML(otp)
   };
 
@@ -137,12 +137,12 @@ function getResetPasswordOTPHTML(otp) {
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
       <div style="background: #fffbe8; padding: 20px; border-radius: 10px; border: 1px solid #ffd700;">
         <h2 style="color: #000; text-align: center; margin-bottom: 20px;">🎸 My Guitar</h2>
-        <h3 style="color: #333;">Mã OTP đặt lại mật khẩu</h3>
+        <h3 style="color: #333;">Xác thực đổi mật khẩu</h3>
         
         <p>Xin chào,</p>
-        <p>Bạn đã yêu cầu đặt lại mật khẩu cho tài khoản của mình.</p>
+        <p>Bạn vừa yêu cầu <strong>đổi mật khẩu</strong> cho tài khoản My Guitar của mình.</p>
+        <p>Vui lòng sử dụng <strong>mã OTP</strong> bên dưới để xác nhận yêu cầu:</p>
         
-        <p><strong>Mã OTP của bạn là:</strong></p>
         <div style="background: #000; color: #ffd700; padding: 20px; text-align: center; margin: 20px 0; border-radius: 8px;">
           <h1 style="color: #ffd700; font-size: 32px; letter-spacing: 5px; margin: 0; font-family: monospace;">${otp}</h1>
         </div>
@@ -151,11 +151,13 @@ function getResetPasswordOTPHTML(otp) {
           <p style="margin: 0 0 10px 0;"><strong>⚠️ Lưu ý quan trọng:</strong></p>
           <ul style="margin: 0; padding-left: 20px;">
             <li>Mã OTP có hiệu lực trong <strong>5 phút</strong></li>
-            <li>Chỉ sử dụng được <strong>một lần</strong></li>
-            <li>Không chia sẻ mã này với ai khác</li>
-            <li>Nếu không yêu cầu, vui lòng bỏ qua email này</li>
+            <li>Mã chỉ sử dụng <strong>một lần</strong></li>
+            <li>Không chia sẻ mã này với bất kỳ ai</li>
+            <li>Nếu không phải bạn thực hiện, vui lòng bỏ qua email này</li>
           </ul>
         </div>
+        
+        <p style="color:#333">Sau khi nhập đúng OTP, bạn sẽ được tiến hành đổi mật khẩu mới.</p>
       </div>
       
       <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
