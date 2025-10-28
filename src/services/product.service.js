@@ -4,6 +4,7 @@ import {
   listBrandsByCategorySlug, // nếu cần reuse
 } from './category.service.js';
 import Brand from '../models/Brand.js';
+import mongoose from 'mongoose';
 
 /**
  * Lấy danh sách sản phẩm với filter nâng cao + search theo q
@@ -107,11 +108,64 @@ export async function getProductBySlugService(slug) {
 }
 
 export async function createProductService(data) {
-  return await Product.create(data);
+  const payload = { ...data };
+
+  // Map category from slug or string to ObjectId
+  if (payload.categorySlug) {
+    const cat = await getCategoryBySlug(payload.categorySlug);
+    if (cat) payload.category = cat._id;
+    delete payload.categorySlug;
+  } else if (typeof payload.category === 'string') {
+    // If category is provided as string and not a valid ObjectId, try as slug
+    if (!mongoose.Types.ObjectId.isValid(payload.category)) {
+      const cat = await getCategoryBySlug(payload.category);
+      if (cat) payload.category = cat._id;
+    }
+  }
+
+  // Map brand from slug or string to ObjectId
+  if (payload.brandSlug) {
+    const br = await Brand.findOne({ slug: payload.brandSlug }).select('_id');
+    if (br) payload.brand = br._id;
+    delete payload.brandSlug;
+  } else if (typeof payload.brand === 'string') {
+    if (!mongoose.Types.ObjectId.isValid(payload.brand)) {
+      const br = await Brand.findOne({ slug: payload.brand }).select('_id');
+      if (br) payload.brand = br._id;
+    }
+  }
+
+  return await Product.create(payload);
 }
 
 export async function updateProductService(id, data) {
-  return await Product.findByIdAndUpdate(id, data, { new: true });
+  const payload = { ...data };
+
+  // Map category
+  if (payload.categorySlug) {
+    const cat = await getCategoryBySlug(payload.categorySlug);
+    if (cat) payload.category = cat._id;
+    delete payload.categorySlug;
+  } else if (typeof payload.category === 'string') {
+    if (!mongoose.Types.ObjectId.isValid(payload.category)) {
+      const cat = await getCategoryBySlug(payload.category);
+      if (cat) payload.category = cat._id;
+    }
+  }
+
+  // Map brand
+  if (payload.brandSlug) {
+    const br = await Brand.findOne({ slug: payload.brandSlug }).select('_id');
+    if (br) payload.brand = br._id;
+    delete payload.brandSlug;
+  } else if (typeof payload.brand === 'string') {
+    if (!mongoose.Types.ObjectId.isValid(payload.brand)) {
+      const br = await Brand.findOne({ slug: payload.brand }).select('_id');
+      if (br) payload.brand = br._id;
+    }
+  }
+
+  return await Product.findByIdAndUpdate(id, payload, { new: true });
 }
 
 export async function deleteProductService(id) {
