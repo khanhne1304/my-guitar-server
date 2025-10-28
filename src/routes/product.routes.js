@@ -18,13 +18,16 @@ const router = Router();
 
 // Public
 router.get('/', listProducts);
-router.get('/:slug', getProductBySlug);
 
+// Place specific routes before generic slug route
 // Theo category
 router.get('/category/:slug', listByCategory);
 
 // Theo category + brand
 router.get('/category/:categorySlug/brand/:brandSlug', listByCategoryAndBrand);
+
+// Generic by slug (must be last)
+router.get('/:slug', getProductBySlug);
 
 // Admin
 router.post('/', protect, admin, validateProductCreate, createProduct);
