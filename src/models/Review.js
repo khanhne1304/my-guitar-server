@@ -11,7 +11,7 @@ const reviewSchema = new mongoose.Schema(
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
+      required: [true, 'Đánh giá phải thuộc về một người dùng'],
       index: true,
     },
     rating: { type: Number, min: 1, max: 5, required: true },

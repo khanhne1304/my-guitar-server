@@ -18,7 +18,8 @@ const cartSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       unique: true,
-      required: true,
+      required: [true, 'Giỏ hàng phải thuộc về một người dùng'],
+      index: true,
     },
     items: [cartItemSchema],
     // cache total optional: có thể tính động khi cần

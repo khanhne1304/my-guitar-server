@@ -1,6 +1,7 @@
 import { validationResult } from 'express-validator';
 import {
   listCoupons,
+  listCouponsAdmin,
   createCoupon,
   getCouponByCode,
   updateCoupon,
@@ -11,6 +12,21 @@ import {
 export async function list(req, res, next) {
   try {
     res.json(await listCoupons());
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function listAdmin(req, res, next) {
+  try {
+    const { page = 1, limit = 10, search, status } = req.query;
+    const result = await listCouponsAdmin({
+      page: parseInt(page),
+      limit: parseInt(limit),
+      search,
+      status
+    });
+    res.json(result);
   } catch (e) {
     next(e);
   }

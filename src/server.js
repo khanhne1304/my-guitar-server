@@ -69,6 +69,12 @@ import couponRoutes from './routes/coupon.routes.js';
 import reviewRoutes from './routes/review.routes.js';
 import songRoutes from './routes/song.routes.js';
 import addressRoutes from './routes/address.routes.js';
+import statisticsRoutes from './routes/statistics.routes.js';
+import adminUserRoutes from './routes/adminUser.routes.js';
+import adminCouponRoutes from './routes/adminCoupon.routes.js';
+import adminReviewRoutes from './routes/adminReview.routes.js';
+import adminNotificationRoutes from './routes/adminNotification.routes.js';
+import notificationRoutes from './routes/notification.routes.js';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
@@ -80,6 +86,12 @@ app.use('/api/coupons', couponRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/songs', songRoutes);
 app.use('/api/addresses', addressRoutes);
+app.use('/api/admin/statistics', statisticsRoutes);
+app.use('/api/admin/users', adminUserRoutes);
+app.use('/api/admin/coupons', adminCouponRoutes);
+app.use('/api/admin/reviews', adminReviewRoutes);
+app.use('/api/admin/notifications', adminNotificationRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 

@@ -4,6 +4,70 @@ export async function listCoupons() {
   return await Coupon.find().sort('-createdAt');
 }
 
+export async function listCouponsAdmin({ page = 1, limit = 10, search, status }) {
+  const skip = (page - 1) * limit;
+  
+  // Xây dựng query
+  const query = {};
+  
+  // Tìm kiếm theo code
+  if (search) {
+    query.code = { $regex: search, $options: 'i' };
+  }
+  
+  // Lọc theo status
+  if (status) {
+    const now = new Date();
+    if (status === 'active') {
+      query.isActive = true;
+      query.$and = [
+        {
+          $or: [
+            { startAt: { $exists: false } },
+            { startAt: null },
+            { startAt: { $lte: now } }
+          ]
+        },
+        {
+          $or: [
+            { endAt: { $exists: false } },
+            { endAt: null },
+            { endAt: { $gte: now } }
+          ]
+        }
+      ];
+    } else if (status === 'expired') {
+      query.endAt = { $lt: now };
+    } else if (status === 'inactive') {
+      query.isActive = false;
+    }
+  }
+  
+  // Đếm tổng số coupons
+  const total = await Coupon.countDocuments(query);
+  
+  // Lấy danh sách coupons
+  const coupons = await Coupon.find(query)
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+  
+  const totalPages = Math.ceil(total / limit);
+  
+  return {
+    coupons,
+    pagination: {
+      currentPage: page,
+      totalPages,
+      total,
+      limit,
+      hasNext: page < totalPages,
+      hasPrev: page > 1
+    }
+  };
+}
+
 export async function createCoupon(data) {
   return await Coupon.create(data);
 }

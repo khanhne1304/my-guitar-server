@@ -1,15 +1,41 @@
 import { validationResult } from 'express-validator';
 import {
   listReviewsService,
+  listReviewsAdmin,
   createReviewService,
   updateMyReviewService,
   deleteReviewService,
+  getReviewableProductsService,
 } from '../services/review.service.js';
 
 export async function listReviews(req, res, next) {
   try {
     const items = await listReviewsService(req.query.product);
     res.json(items);
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function listAdmin(req, res, next) {
+  try {
+    const { page = 1, limit = 10, search, rating } = req.query;
+    const result = await listReviewsAdmin({
+      page: parseInt(page),
+      limit: parseInt(limit),
+      search,
+      rating
+    });
+    res.json(result);
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function getReviewableProducts(req, res, next) {
+  try {
+    const products = await getReviewableProductsService(req.user.id);
+    res.json(products);
   } catch (e) {
     next(e);
   }
@@ -26,6 +52,8 @@ export async function createReview(req, res, next) {
   } catch (e) {
     if (e.message === 'INVALID_PRODUCT')
       return res.status(400).json({ message: 'Sản phẩm không hợp lệ' });
+    if (e.message === 'ORDER_NOT_COMPLETED')
+      return res.status(403).json({ message: 'Chỉ có thể đánh giá sản phẩm sau khi đơn hàng đã hoàn thành' });
     if (e.message === 'DUPLICATE_REVIEW')
       return res.status(409).json({ message: 'Bạn đã đánh giá sản phẩm này' });
     next(e);

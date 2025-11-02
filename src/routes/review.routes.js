@@ -5,6 +5,7 @@ import {
   createReview,
   updateMyReview,
   deleteReview,
+  getReviewableProducts,
 } from '../controllers/review.controller.js';
 import { validateCreateReview } from '../validators/review.validator.js';
 
@@ -14,6 +15,7 @@ const router = Router();
 router.get('/', listReviews);
 
 // User
+router.get('/reviewable', protect, getReviewableProducts);
 router.post('/', protect, validateCreateReview, createReview);
 router.patch('/:id', protect, updateMyReview);
 router.delete('/:id', protect, deleteReview);
