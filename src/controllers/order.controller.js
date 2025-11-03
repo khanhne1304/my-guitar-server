@@ -5,6 +5,8 @@ import {
   getUserOrders,
   payOrderService,
   adminListOrdersService,
+  confirmReceivedService,
+  cancelOrderService,
 } from '../services/order.service.js';
 
 export async function createOrderFromCart(req, res, next) {
@@ -39,44 +41,62 @@ export async function updateOrderStatus(req, res, next) {
     if (!order) return res.status(404).json({ message: 'Không tìm thấy đơn hàng' });
 
     // Chỉ cập nhật nếu status hợp lệ
-    const allowedStatuses = ['pending', 'paid', 'shipped', 'completed', 'cancelled'];
+    const allowedStatuses = ['pending', 'paid', 'shipped', 'delivered', 'completed', 'cancelled'];
     if (!allowedStatuses.includes(status)) {
       return res.status(400).json({ message: 'Trạng thái không hợp lệ' });
     }
 
-    // Ràng buộc admin:
-    // - Không được cancel nếu đơn đã ở trạng thái paid hoặc shipped hoặc completed
+    // Ràng buộc admin theo logic thực tế:
+    
+    // - Không thể cancel nếu đơn đã được giao (delivered, completed)
     if (status === 'cancelled') {
-      if (['paid', 'shipped', 'completed'].includes(order.status)) {
-        return res.status(400).json({ message: 'Không thể hủy đơn đã thanh toán hoặc đang/đã giao' });
+      if (['delivered', 'completed'].includes(order.status)) {
+        return res.status(400).json({ message: 'Không thể hủy đơn đã được giao' });
+      }
+      // Cho phép cancel nếu đã shipped (trường hợp không giao được) nhưng cảnh báo
+      if (order.status === 'shipped') {
+        // Có thể cho phép nhưng nên có xác nhận ở frontend
       }
     }
 
-    // - Trạng thái completed chỉ được chuyển từ shipped
+    // - Trạng thái completed KHÔNG được admin chuyển trực tiếp từ delivered
+    // - Chỉ có thể chuyển sang completed thông qua endpoint confirmReceived (user xác nhận đã nhận hàng)
     if (status === 'completed') {
-      if (order.status !== 'shipped') {
-        return res.status(400).json({ message: 'Chỉ có thể hoàn tất đơn từ trạng thái shipped' });
-      }
+      return res.status(400).json({ 
+        message: 'Không thể chuyển trạng thái sang hoàn tất. Chỉ người dùng mới có thể xác nhận đã nhận hàng để hoàn tất đơn hàng.' 
+      });
     }
 
-    // - Cho phép chuyển từ pending -> paid, paid -> shipped
-    // - Ngăn các chuyển trạng thái ngược không hợp lệ
+    // Logic chuyển trạng thái theo quy trình thực tế (admin):
+    // pending -> paid (đã thanh toán online) hoặc shipped (COD hoặc giao trước)
+    // paid -> shipped (đã thanh toán, chuẩn bị giao)
+    // shipped -> delivered (đã giao đến khách)
+    // delivered -> paid (COD: thanh toán sau khi giao)
+    // completed: chỉ có thể đạt được thông qua user xác nhận đã nhận hàng
+    // cancelled: có thể hủy nếu chưa delivered
+    
     const current = order.status;
     const allowedTransitions = {
-      pending: new Set(['paid', 'cancelled']),
-      paid: new Set(['shipped']),
-      shipped: new Set(['completed']),
-      completed: new Set([]),
-      cancelled: new Set([]),
+      pending: new Set(['paid', 'shipped', 'cancelled']),
+      paid: new Set(['shipped', 'cancelled']), // Có thể cancel nếu chưa shipped
+      shipped: new Set(['delivered', 'cancelled']), // Có thể cancel nếu không giao được
+      delivered: new Set(['paid']), // COD: chỉ có thể chuyển sang paid, KHÔNG thể sang completed (chỉ user mới có thể)
+      completed: new Set([]), // Trạng thái cuối cùng, không thể chuyển
+      cancelled: new Set([]), // Trạng thái cuối cùng, không thể chuyển
     };
+    
     if (!allowedTransitions[current].has(status)) {
-      return res.status(400).json({ message: `Không thể chuyển từ ${current} sang ${status}` });
+      return res.status(400).json({ 
+        message: `Không thể chuyển từ "${current}" sang "${status}". Các trạng thái hợp lệ: ${Array.from(allowedTransitions[current]).join(', ')}` 
+      });
+    }
+
+    // Tự động ghi thời điểm thanh toán khi chuyển sang paid
+    if (status === 'paid' && !order.paidAt) {
+      order.paidAt = new Date();
     }
 
     order.status = status;
-    if (status === 'paid' && !order.paidAt) {
-      order.paidAt = new Date(); // tự động ghi thời điểm thanh toán
-    }
     await order.save();
 
     res.json({ message: 'Đã cập nhật trạng thái', order });
@@ -111,6 +131,33 @@ export async function adminListOrders(req, res, next) {
     const orders = await adminListOrdersService();
     res.json(orders);
   } catch (e) {
+    next(e);
+  }
+}
+
+export async function confirmReceived(req, res, next) {
+  try {
+    const order = await confirmReceivedService(req.user.id, req.params.id);
+    res.json({ message: 'Đã xác nhận nhận hàng', order });
+  } catch (e) {
+    if (e.message === 'NOT_FOUND')
+      return res.status(404).json({ message: 'Không tìm thấy đơn hàng' });
+    if (e.message === 'INVALID_STATUS')
+      return res.status(400).json({ message: 'Chỉ có thể xác nhận đơn hàng ở trạng thái đã giao' });
+    next(e);
+  }
+}
+
+export async function cancelOrder(req, res, next) {
+  try {
+    const { reason } = req.body;
+    const order = await cancelOrderService(req.user.id, req.params.id, reason);
+    res.json({ message: 'Đã hủy đơn hàng', order });
+  } catch (e) {
+    if (e.message === 'NOT_FOUND')
+      return res.status(404).json({ message: 'Không tìm thấy đơn hàng' });
+    if (e.message === 'INVALID_STATUS')
+      return res.status(400).json({ message: 'Không thể hủy đơn đã giao/hoàn tất' });
     next(e);
   }
 }
