@@ -32,11 +32,16 @@ const orderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['pending', 'paid', 'shipped', 'completed', 'cancelled'],
+      enum: ['pending', 'paid', 'shipped', 'delivered', 'completed', 'cancelled'],
       default: 'pending',
     },
     total: Number,
     paidAt: Date,
+    cancelReason: {
+      type: String,
+      trim: true,
+    },
+    cancelledAt: Date,
   },
   { timestamps: true },
 );

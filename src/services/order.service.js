@@ -83,3 +83,28 @@ export async function payOrderService(userId, orderId) {
 export async function adminListOrdersService() {
   return await Order.find().populate('user', 'username email').sort('-createdAt');
 }
+
+export async function confirmReceivedService(userId, orderId) {
+  const order = await Order.findOne({ _id: orderId, user: userId });
+  if (!order) throw new Error('NOT_FOUND');
+  if (order.status !== 'delivered') {
+    throw new Error('INVALID_STATUS');
+  }
+
+  order.status = 'completed';
+  await order.save();
+  return order;
+}
+
+export async function cancelOrderService(userId, orderId, reason) {
+  const order = await Order.findOne({ _id: orderId, user: userId });
+  if (!order) throw new Error('NOT_FOUND');
+  // Chỉ cho phép hủy nếu chưa delivered/completed
+  if (['delivered', 'completed'].includes(order.status)) throw new Error('INVALID_STATUS');
+
+  order.status = 'cancelled';
+  order.cancelReason = String(reason || '').slice(0, 500);
+  order.cancelledAt = new Date();
+  await order.save();
+  return order;
+}
