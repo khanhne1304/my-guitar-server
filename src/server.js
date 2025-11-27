@@ -75,6 +75,7 @@ import adminCouponRoutes from './routes/adminCoupon.routes.js';
 import adminReviewRoutes from './routes/adminReview.routes.js';
 import adminNotificationRoutes from './routes/adminNotification.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
+import chatRoutes from './routes/chat.routes.js';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
@@ -92,7 +93,7 @@ app.use('/api/admin/coupons', adminCouponRoutes);
 app.use('/api/admin/reviews', adminReviewRoutes);
 app.use('/api/admin/notifications', adminNotificationRoutes);
 app.use('/api/notifications', notificationRoutes);
-
+app.use('/api/chat', chatRoutes);
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
 /** --------- ERRORS --------- **/
