@@ -22,7 +22,7 @@ export const companyInfo = {
 		warrantyPolicy: '/warranty-policy',
 		warrantyLookup: '/warranty',
 	},
-	payments: ['VISA', 'MasterCard', 'COD', 'napas', '123Pay'],
+	payments: ['VISA', 'COD'],
 	certifications: ['Bộ Công Thương', 'DMCA', 'PROTECTED'],
 	socials: {
 		facebook: 'https://facebook.com',
@@ -89,7 +89,7 @@ export function answerCompanyQuestion(message) {
 		return `Chính sách bảo hành: ${routes.warrantyPolicy}. Tra cứu/Kích hoạt bảo hành: ${routes.warrantyLookup}.`;
 	}
 
-	const wantsPayment = /(thanh toán|thanh toan|payment|visa|mastercard|cod|napas)/.test(t);
+	const wantsPayment = /(thanh toán|thanh toan|payment|visa|cod)/.test(t);
 	if (wantsPayment) {
 		return `Hỗ trợ thanh toán: ${payments.join(', ')}. Xem thêm: ${routes.paymentSecurity}.`;
 	}
