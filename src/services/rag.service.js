@@ -183,7 +183,6 @@ function formatContext(products) {
 function detectInstruments(text) {
 	const t = String(text || '').toLowerCase();
 	const map = {
-		piano: ['piano', 'đàn piano'],
 		guitar: ['guitar', 'đàn guitar'],
 		ukulele: ['ukulele', 'uke'],
 		organ: ['organ', 'keyboard'],
@@ -299,7 +298,7 @@ export async function answerQuestion({ message, budgetMin, budgetMax, k = 6 }) {
 
 	const ctx = formatContext(retrieved);
 	const sys =
-		'Bạn là trợ lý tư vấn sản phẩm nhạc cụ. Trả lời bằng tiếng Việt, ngắn gọn, chỉ dựa vào CONTEXT. Luôn ưu tiên đúng loại nhạc cụ người dùng hỏi (ví dụ hỏi piano thì không gợi ý guitar). Nếu có ngân sách, CHỈ gợi ý trong khoảng ngân sách; nếu không có sản phẩm phù hợp thì nói: “Xin lỗi, không có sản phẩm phù hợp nhu cầu của bạn.”';
+		'Bạn là trợ lý tư vấn sản phẩm nhạc cụ. Trả lời bằng tiếng Việt, ngắn gọn, chỉ dựa vào CONTEXT. Luôn ưu tiên đúng loại nhạc cụ người dùng hỏi. Nếu có ngân sách, CHỈ gợi ý trong khoảng ngân sách; nếu không có sản phẩm phù hợp thì nói: "Xin lỗi, không có sản phẩm phù hợp nhu cầu của bạn."';
 	const prompt =
 		`CÂU HỎI: ${message}\n\nCONTEXT (Danh sách ứng viên):\n${ctx}\n\nYÊU CẦU: Đề xuất 3 sản phẩm phù hợp nhất với câu hỏi/ngân sách (nếu có). Trình bày gọn, nêu tên và giá.`;
 
