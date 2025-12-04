@@ -76,6 +76,7 @@ import adminReviewRoutes from './routes/adminReview.routes.js';
 import adminNotificationRoutes from './routes/adminNotification.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
 import legatoRoutes from './routes/legato.routes.js';
+import aiRoutes from './routes/ai.routes.js';
 import chatRoutes from './routes/chat.routes.js';
 
 app.use('/api/auth', authRoutes);
@@ -95,6 +96,7 @@ app.use('/api/admin/reviews', adminReviewRoutes);
 app.use('/api/admin/notifications', adminNotificationRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/legato', legatoRoutes);
+app.use('/api/ai', aiRoutes);
 app.use('/api/chat', chatRoutes);
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
