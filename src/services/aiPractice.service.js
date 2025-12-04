@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { getCloudinaryUrl } from '../utils/cloudinary.js';
 import AiPracticeResult from '../models/AiPracticeResult.js';
 
 export const REQUIRED_FEATURE_KEYS = [
@@ -269,5 +270,77 @@ export async function fetchAiPracticeHistory(userId, { limit = 20, lessonId } = 
       bestOverall: Number(aggregate.bestOverall.toFixed(2)),
     },
   };
+}
+
+/**
+ * Lấy danh sách audio files đã upload của user
+ * @param {string} userId - ID của user
+ * @param {Object} options - Tùy chọn: limit, lessonId, includeMetadata
+ * @returns {Promise<Array>} Danh sách audio files với metadata
+ */
+export async function fetchUserAudioFiles(userId, { limit = 50, lessonId, includeMetadata = true } = {}) {
+  if (!userId) throw new Error('Thiếu user để lấy danh sách audio.');
+
+  const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+  const query = { user: userId };
+  if (lessonId) query.lessonId = lessonId;
+
+  const results = await AiPracticeResult.find(query)
+    .sort({ createdAt: -1 })
+    .limit(safeLimit)
+    .select('metadata createdAt lessonId lessonTitle level scores')
+    .lean();
+
+  // Lọc và map các results có metadata audio (có cloudinaryUrl hoặc audioFile)
+  const audioFiles = results
+    .filter((result) => {
+      // Lấy cả records có cloudinaryUrl hoặc audioFile (cho tương thích ngược)
+      return (
+        result.metadata?.cloudinaryUrl ||
+        result.metadata?.cloudinaryPublicId ||
+        result.metadata?.audioFile
+      );
+    })
+    .map((result) => {
+      const metadata = result.metadata || {};
+      
+      // Lấy cloudinaryUrl từ metadata hoặc từ audioFile nếu có
+      let cloudinaryUrl = metadata.cloudinaryUrl;
+      let cloudinaryPublicId = metadata.cloudinaryPublicId || metadata.audioFile;
+      
+      // Nếu có publicId nhưng chưa có URL, tạo URL từ publicId
+      if (!cloudinaryUrl && cloudinaryPublicId) {
+        try {
+          cloudinaryUrl = getCloudinaryUrl(cloudinaryPublicId);
+        } catch (err) {
+          console.warn(`Không thể tạo URL từ publicId ${cloudinaryPublicId}:`, err.message);
+        }
+      }
+
+      const audio = {
+        id: result._id.toString(),
+        cloudinaryUrl: cloudinaryUrl,
+        cloudinaryPublicId: cloudinaryPublicId,
+        originalFilename: metadata.originalFilename || metadata.originalname || 'Không có tên',
+        uploadedAt: result.createdAt,
+        lessonId: result.lessonId,
+        lessonTitle: result.lessonTitle,
+        level: result.level,
+        overallScore: result.scores?.regression?.overall_score || 0,
+        levelClass: result.scores?.classification?.level_class || 0,
+      };
+
+      if (includeMetadata) {
+        audio.metadata = {
+          mimetype: metadata.mimetype,
+          size: metadata.size,
+          requestedAt: metadata.requestedAt,
+        };
+      }
+
+      return audio;
+    });
+
+  return audioFiles;
 }
 

@@ -1,21 +1,4 @@
-import fs from 'fs';
-import path from 'path';
 import multer from 'multer';
-
-const uploadDir = path.resolve(process.cwd(), 'tmp', 'ai-audio');
-
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: (_, __, cb) => cb(null, uploadDir),
-  filename: (_, file, cb) => {
-    const timestamp = Date.now();
-    const safeOriginal = file.originalname.replace(/\s+/g, '_');
-    cb(null, `${timestamp}-${safeOriginal}`);
-  },
-});
 
 const allowedMime = new Set([
   'audio/mpeg',
@@ -33,6 +16,9 @@ function fileFilter(_, file, cb) {
     cb(new Error('Định dạng audio không được hỗ trợ.'));
   }
 }
+
+// Sử dụng memory storage để upload lên Cloudinary
+const storage = multer.memoryStorage();
 
 export const audioUpload = multer({
   storage,
