@@ -3,8 +3,10 @@ import {
   scorePracticeClip,
   getAiPracticeHistory,
   uploadPracticeAudio,
+  analyzePracticeAudio,
   getUserAudioFiles,
   listCloudinaryAudioFiles,
+  deleteUserAudio,
 } from '../controllers/ai.controller.js';
 import { protect } from '../middlewares/auth.js';
 import { audioUpload } from '../middlewares/audioUpload.js';
@@ -35,6 +37,16 @@ router.post('/practice/score', protect, scorePracticeClip);
 router.get('/practice/history', protect, getAiPracticeHistory);
 router.get('/practice/audios', protect, getUserAudioFiles); // Lấy danh sách audio của user
 router.get('/practice/audios/cloudinary', protect, listCloudinaryAudioFiles); // Lấy từ Cloudinary (tất cả)
+router.delete('/practice/audios/:id', protect, deleteUserAudio); // Xóa audio của user
+// Phân tích audio chỉ để tính điểm, không upload
+router.post(
+  '/practice/analyze',
+  protect,
+  audioUpload.single('audio'),
+  handleMulterError,
+  analyzePracticeAudio,
+);
+// Upload audio lên Cloudinary và lưu vào database
 router.post(
   '/practice/upload',
   protect,

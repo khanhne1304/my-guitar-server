@@ -27,7 +27,7 @@ const orderSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ['cod', 'vnpay'],
+      enum: ['cod', 'vnpay', 'momo'],
       default: 'cod',
     },
     status: {

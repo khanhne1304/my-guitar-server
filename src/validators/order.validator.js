@@ -13,5 +13,5 @@ export const validateCreateOrder = [
   body('items.*.price').optional().isNumeric(),
   body('items.*.qty').optional().isInt({ min: 1 }),
   body('total').optional().isNumeric(),
-  body('paymentMethod').optional().isIn(['cod', 'vnpay']),
+  body('paymentMethod').optional().isIn(['cod', 'vnpay', 'momo']),
 ];

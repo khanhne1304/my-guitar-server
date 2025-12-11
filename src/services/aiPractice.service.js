@@ -2,7 +2,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getCloudinaryUrl } from '../utils/cloudinary.js';
+import { getCloudinaryUrl, checkCloudinaryFileExists } from '../utils/cloudinary.js';
 import AiPracticeResult from '../models/AiPracticeResult.js';
 
 export const REQUIRED_FEATURE_KEYS = [
@@ -275,10 +275,11 @@ export async function fetchAiPracticeHistory(userId, { limit = 20, lessonId } = 
 /**
  * Lấy danh sách audio files đã upload của user
  * @param {string} userId - ID của user
- * @param {Object} options - Tùy chọn: limit, lessonId, includeMetadata
+ * @param {Object} options - Tùy chọn: limit, lessonId, includeMetadata, validateCloudinary
+ * @param {boolean} options.validateCloudinary - Kiểm tra file còn tồn tại trên Cloudinary (mặc định: true)
  * @returns {Promise<Array>} Danh sách audio files với metadata
  */
-export async function fetchUserAudioFiles(userId, { limit = 50, lessonId, includeMetadata = true } = {}) {
+export async function fetchUserAudioFiles(userId, { limit = 50, lessonId, includeMetadata = true, validateCloudinary = true } = {}) {
   if (!userId) throw new Error('Thiếu user để lấy danh sách audio.');
 
   const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
@@ -292,7 +293,7 @@ export async function fetchUserAudioFiles(userId, { limit = 50, lessonId, includ
     .lean();
 
   // Lọc và map các results có metadata audio (có cloudinaryUrl hoặc audioFile)
-  const audioFiles = results
+  const audioFilesWithMetadata = results
     .filter((result) => {
       // Lấy cả records có cloudinaryUrl hoặc audioFile (cho tương thích ngược)
       return (
@@ -317,7 +318,7 @@ export async function fetchUserAudioFiles(userId, { limit = 50, lessonId, includ
         }
       }
 
-      const audio = {
+      return {
         id: result._id.toString(),
         cloudinaryUrl: cloudinaryUrl,
         cloudinaryPublicId: cloudinaryPublicId,
@@ -328,19 +329,126 @@ export async function fetchUserAudioFiles(userId, { limit = 50, lessonId, includ
         level: result.level,
         overallScore: result.scores?.regression?.overall_score || 0,
         levelClass: result.scores?.classification?.level_class || 0,
-      };
-
-      if (includeMetadata) {
-        audio.metadata = {
+        metadata: includeMetadata ? {
           mimetype: metadata.mimetype,
           size: metadata.size,
           requestedAt: metadata.requestedAt,
-        };
-      }
-
-      return audio;
+        } : undefined,
+      };
     });
 
-  return audioFiles;
+  // Kiểm tra từng file xem còn tồn tại trên Cloudinary không (nếu bật validation)
+  if (validateCloudinary) {
+    const validatedAudioFiles = [];
+    const filesToCheck = audioFilesWithMetadata.filter(audio => audio.cloudinaryPublicId);
+    const filesWithoutPublicId = audioFilesWithMetadata.filter(audio => !audio.cloudinaryPublicId);
+
+    // Kiểm tra song song các files có publicId
+    if (filesToCheck.length > 0) {
+      console.log(`🔍 Đang kiểm tra ${filesToCheck.length} files trên Cloudinary để đồng bộ...`);
+      
+      const existenceChecks = await Promise.allSettled(
+        filesToCheck.map(async (audio) => {
+          const exists = await checkCloudinaryFileExists(audio.cloudinaryPublicId);
+          return { audio, exists };
+        })
+      );
+
+      for (let i = 0; i < existenceChecks.length; i++) {
+        const check = existenceChecks[i];
+        const audio = filesToCheck[i];
+        
+        if (check.status === 'fulfilled') {
+          const { exists } = check.value;
+          if (exists) {
+            validatedAudioFiles.push(audio);
+          } else {
+            console.warn(`⚠️ File không còn tồn tại trên Cloudinary, bỏ qua: ${audio.cloudinaryPublicId} (ID: ${audio.id})`);
+            // Tự động xóa record trong database nếu file không còn trên Cloudinary
+            try {
+              await AiPracticeResult.deleteOne({ _id: audio.id });
+              console.log(`🗑️ Đã tự động xóa record ${audio.id} vì file không còn trên Cloudinary`);
+            } catch (deleteError) {
+              console.error(`❌ Lỗi khi xóa record ${audio.id}:`, deleteError.message);
+            }
+          }
+        } else {
+          console.error(`❌ Lỗi khi kiểm tra file ${audio.cloudinaryPublicId}:`, check.reason);
+          // Nếu lỗi khi kiểm tra, vẫn giữ file trong danh sách (cho an toàn)
+          validatedAudioFiles.push(audio);
+        }
+      }
+    }
+
+    // Thêm các files không có publicId (cho tương thích ngược, nhưng sẽ không có URL)
+    validatedAudioFiles.push(...filesWithoutPublicId);
+
+    console.log(`✅ Trả về ${validatedAudioFiles.length}/${audioFilesWithMetadata.length} audio files (đã validate và đồng bộ)`);
+
+    return validatedAudioFiles;
+  } else {
+    // Không validate, trả về tất cả
+    console.log(`✅ Trả về ${audioFilesWithMetadata.length} audio files (không validate)`);
+    return audioFilesWithMetadata;
+  }
+}
+
+/**
+ * Xóa audio file của user (cả trong database và Cloudinary)
+ * @param {string} userId - ID của user
+ * @param {string} audioId - ID của audio record trong database
+ * @returns {Promise<Object>} Kết quả xóa
+ */
+export async function deleteUserAudioFile(userId, audioId) {
+  if (!userId) throw new Error('Thiếu user để xóa audio.');
+  if (!audioId) throw new Error('Thiếu audio ID để xóa.');
+
+  // Tìm audio record trong database
+  const audioRecord = await AiPracticeResult.findOne({
+    _id: audioId,
+    user: userId,
+  }).lean();
+
+  if (!audioRecord) {
+    throw new Error('Không tìm thấy audio hoặc bạn không có quyền xóa.');
+  }
+
+  // Lấy publicId từ metadata
+  const metadata = audioRecord.metadata || {};
+  const cloudinaryPublicId = metadata.cloudinaryPublicId || metadata.audioFile;
+
+  if (!cloudinaryPublicId) {
+    console.warn(`⚠️ Audio record ${audioId} không có cloudinaryPublicId, chỉ xóa trong database`);
+  }
+
+  // Xóa từ Cloudinary (nếu có publicId)
+  let cloudinaryResult = null;
+  if (cloudinaryPublicId) {
+    try {
+      const { deleteAudioFromCloudinary } = await import('../utils/cloudinary.js');
+      cloudinaryResult = await deleteAudioFromCloudinary(cloudinaryPublicId);
+    } catch (error) {
+      // Log lỗi nhưng vẫn tiếp tục xóa trong database
+      console.error(`❌ Lỗi khi xóa từ Cloudinary (publicId: ${cloudinaryPublicId}):`, error.message);
+      // Không throw error để vẫn có thể xóa record trong database
+    }
+  }
+
+  // Xóa record trong database
+  const deleteResult = await AiPracticeResult.deleteOne({
+    _id: audioId,
+    user: userId,
+  });
+
+  if (deleteResult.deletedCount === 0) {
+    throw new Error('Không thể xóa audio từ database.');
+  }
+
+  return {
+    deleted: true,
+    audioId,
+    cloudinaryDeleted: cloudinaryResult?.result === 'ok',
+    cloudinaryPublicId: cloudinaryPublicId || null,
+  };
 }
 
