@@ -6,7 +6,8 @@ import {
   getCouponByCode,
   updateCoupon,
   deleteCoupon,
-  applyCoupon,
+  validateCoupon,
+  applyCouponForPreview,
 } from '../services/coupon.service.js';
 
 export async function list(req, res, next) {
@@ -80,7 +81,8 @@ export async function remove(req, res, next) {
 export async function apply(req, res, next) {
   try {
     const { code, orderTotal } = req.body;
-    const result = await applyCoupon(code, orderTotal);
+    // Sử dụng validateCoupon cho preview (không tăng usedCount)
+    const result = await validateCoupon(code, orderTotal);
     res.json(result);
   } catch (e) {
     if (e.message === 'INVALID_COUPON')

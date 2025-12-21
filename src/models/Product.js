@@ -33,8 +33,8 @@ const productSchema = new mongoose.Schema(
       color: String,
     },
     price: {
-      base: { type: Number, required: true },
-      sale: { type: Number },
+      base: { type: Number, required: true, min: 0 },
+      sale: { type: Number, min: 0 },
       currency: { type: String, default: 'VND' },
     },
     stock: { type: Number, default: 0 },

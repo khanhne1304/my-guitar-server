@@ -149,10 +149,11 @@ export async function deleteReviewService(user, reviewId) {
       ? { _id: reviewId }
       : { _id: reviewId, user: user.id };
 
-  const rev = await Review.findOne(filter);
+  // Sử dụng findOneAndDelete để hook có thể truy cập document
+  const rev = await Review.findOneAndDelete(filter);
   if (!rev) throw new Error('NOT_FOUND');
   
-  // Sử dụng deleteOne thay vì remove (deprecated)
-  await Review.deleteOne({ _id: reviewId });
+  // Hook sẽ tự động gọi recalcProductRating, nhưng đảm bảo bằng cách gọi thủ công
+  await Review.recalcProductRating(rev.product);
   return rev;
 }
