@@ -8,6 +8,8 @@ import cookieParser from 'cookie-parser';
 import { connectDB } from './config/db.js';
 import favoriteRoutes from './routes/favorite.routes.js';
 import userRoutes from './routes/user.routes.js';
+import passport from 'passport';
+import './config/passport.js';
 dotenv.config();
 const app = express();
 
@@ -49,6 +51,7 @@ app.use('/api/favorites', favoriteRoutes);
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(cookieParser());
+app.use(passport.initialize());
 app.use('/api/users', userRoutes)
 // Tắt ETag để tránh 304 Not Modified và luôn trả body
 app.disable('etag');

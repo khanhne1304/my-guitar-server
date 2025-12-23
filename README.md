@@ -27,6 +27,18 @@ The backend now proxies the clip-level AI scoring pipeline so the “Luyện t�
 
 > Ensure the `my-guitar-ai-service` project has been trained so that the artifacts exist before hitting the API.
 
+#### Facebook OAuth (Login/Signup)
+| Key | Default | Description |
+| --- | --- | --- |
+| `FACEBOOK_APP_ID` |  | Facebook App ID (Required) |
+| `FACEBOOK_APP_SECRET` |  | Facebook App Secret (Required) |
+| `FACEBOOK_CALLBACK_URL` | `http://localhost:4000/api/auth/facebook/callback` | OAuth callback URL |
+| `FRONTEND_URL` | `http://localhost:3000` | Frontend base URL for redirect after login |
+
+Notes:
+- Enable "Facebook Login" product in Facebook Developer Console and add the callback URL to Valid OAuth Redirect URIs.
+- Add your frontend origin to `CORS_ORIGIN` if you deploy.
+
 ### REST endpoints
 
 1. `POST /api/ai/practice/score` (requires auth)
