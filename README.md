@@ -27,6 +27,29 @@ The backend now proxies the clip-level AI scoring pipeline so the “Luyện t�
 
 > Ensure the `my-guitar-ai-service` project has been trained so that the artifacts exist before hitting the API.
 
+#### Facebook OAuth (Login/Signup)
+| Key | Default | Description |
+| --- | --- | --- |
+| `FACEBOOK_APP_ID` |  | Facebook App ID (Required) |
+| `FACEBOOK_APP_SECRET` |  | Facebook App Secret (Required) |
+| `FACEBOOK_CALLBACK_URL` | `http://localhost:4000/api/auth/facebook/callback` | OAuth callback URL |
+| `FRONTEND_URL` | `http://localhost:3000` | Frontend base URL for redirect after login |
+
+Notes:
+- Enable "Facebook Login" product in Facebook Developer Console and add the callback URL to Valid OAuth Redirect URIs.
+- Add your frontend origin to `CORS_ORIGIN` if you deploy.
+
+#### Google OAuth (Login/Signup)
+| Key | Default | Description |
+| --- | --- | --- |
+| `GOOGLE_CLIENT_ID` |  | Google OAuth2 Client ID (Required) |
+| `GOOGLE_CLIENT_SECRET` |  | Google OAuth2 Client Secret (Required) |
+| `GOOGLE_CALLBACK_URL` | `http://localhost:4000/api/auth/google/callback` | OAuth callback URL |
+
+Notes:
+- Create OAuth 2.0 Client (type Web) at Google Cloud Console, add Authorized redirect URIs accordingly.
+- Add your frontend origin to `CORS_ORIGIN` if you deploy.
+
 ### REST endpoints
 
 1. `POST /api/ai/practice/score` (requires auth)

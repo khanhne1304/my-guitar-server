@@ -3,7 +3,7 @@ import User from '../models/User.js';
 import crypto from 'crypto';
 import { sendOTPEmail } from './emailService.js';
 
-function signToken(user) {
+export function signToken(user) {
   try {
     if (!process.env.JWT_SECRET) {
       throw new Error('JWT_SECRET is not defined');
@@ -57,6 +57,14 @@ export async function loginUser(identifier, password) {
   }).select('+password');
 
   if (!user) throw new Error('INVALID_CREDENTIALS');
+
+  // Chỉ cho phép đăng nhập mật khẩu với tài khoản local
+  if (user.provider && user.provider !== 'local') {
+    throw new Error('INVALID_CREDENTIALS');
+  }
+  if (!user.password) {
+    throw new Error('INVALID_CREDENTIALS');
+  }
 
   const ok = await user.comparePassword(password);
   if (!ok) throw new Error('INVALID_CREDENTIALS');
@@ -364,4 +372,115 @@ export async function verifyOTPAndRegister({ username, email, fullName, address,
     // Re-throw lỗi khác
     throw createError;
   }
+}
+
+// ---- Social login helpers ----
+async function generateUniqueUsername(base) {
+  const normalized = (base || 'user')
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 24);
+  let candidate = normalized || 'user';
+  let counter = 0;
+  while (counter < 50) {
+    const maybe = counter === 0 ? candidate : `${candidate}${Math.floor(Math.random() * 10000)}`;
+    const trimmed = maybe.slice(0, 30);
+    const exists = await User.findOne({ username: trimmed }).lean();
+    if (!exists) return trimmed;
+    counter++;
+  }
+  return `user_${crypto.randomInt(100000, 999999)}`;
+}
+
+export async function findOrCreateFacebookUser({ facebookId, email, fullName, avatarUrl }) {
+  let user = null;
+  if (facebookId) {
+    user = await User.findOne({ facebookId });
+  }
+  if (!user && email) {
+    user = await User.findOne({ email: email.toLowerCase() });
+  }
+
+  if (user) {
+    let changed = false;
+    if (!user.facebookId && facebookId) {
+      user.facebookId = facebookId;
+      user.provider = 'facebook';
+      changed = true;
+    }
+    if (!user.avatarUrl && avatarUrl) {
+      user.avatarUrl = avatarUrl;
+      changed = true;
+    }
+    if (!user.fullName && fullName) {
+      user.fullName = fullName;
+      changed = true;
+    }
+    if (changed) await user.save();
+    return user;
+  }
+
+  const baseUsername =
+    email ? email.split('@')[0] : (fullName || `fb_${facebookId || crypto.randomInt(1000, 9999)}`);
+  const uniqueUsername = await generateUniqueUsername(baseUsername);
+
+  user = await User.create({
+    username: uniqueUsername,
+    email: (email || `${uniqueUsername}@facebook.local`).toLowerCase(),
+    fullName: fullName || '',
+    address: '',
+    phone: undefined,
+    provider: 'facebook',
+    facebookId: facebookId || undefined,
+    avatarUrl: avatarUrl || undefined,
+  });
+
+  return user;
+}
+
+export async function findOrCreateGoogleUser({ googleId, email, fullName, avatarUrl }) {
+  let user = null;
+  if (googleId) {
+    user = await User.findOne({ googleId });
+  }
+  if (!user && email) {
+    user = await User.findOne({ email: email.toLowerCase() });
+  }
+
+  if (user) {
+    let changed = false;
+    if (!user.googleId && googleId) {
+      user.googleId = googleId;
+      user.provider = 'google';
+      changed = true;
+    }
+    if (!user.avatarUrl && avatarUrl) {
+      user.avatarUrl = avatarUrl;
+      changed = true;
+    }
+    if (!user.fullName && fullName) {
+      user.fullName = fullName;
+      changed = true;
+    }
+    if (changed) await user.save();
+    return user;
+  }
+
+  const baseUsername =
+    email ? email.split('@')[0] : (fullName || `gg_${googleId || crypto.randomInt(1000, 9999)}`);
+  const uniqueUsername = await generateUniqueUsername(baseUsername);
+
+  user = await User.create({
+    username: uniqueUsername,
+    email: (email || `${uniqueUsername}@google.local`).toLowerCase(),
+    fullName: fullName || '',
+    address: '',
+    phone: undefined,
+    provider: 'google',
+    googleId: googleId || undefined,
+    avatarUrl: avatarUrl || undefined,
+  });
+
+  return user;
 }
