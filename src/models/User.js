@@ -24,8 +24,9 @@ const userSchema = new mongoose.Schema(
 		},
 		role: { type: String, enum: ['user', 'admin'], default: 'user' },
 		// --- Social login fields ---
-		provider: { type: String, enum: ['local', 'facebook'], default: 'local', index: true },
+		provider: { type: String, enum: ['local', 'facebook', 'google'], default: 'local', index: true },
 		facebookId: { type: String, unique: true, sparse: true, index: true },
+		googleId: { type: String, unique: true, sparse: true, index: true },
 		avatarUrl: { type: String },
 	},
 	{ timestamps: true },

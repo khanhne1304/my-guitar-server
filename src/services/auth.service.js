@@ -438,3 +438,49 @@ export async function findOrCreateFacebookUser({ facebookId, email, fullName, av
 
   return user;
 }
+
+export async function findOrCreateGoogleUser({ googleId, email, fullName, avatarUrl }) {
+  let user = null;
+  if (googleId) {
+    user = await User.findOne({ googleId });
+  }
+  if (!user && email) {
+    user = await User.findOne({ email: email.toLowerCase() });
+  }
+
+  if (user) {
+    let changed = false;
+    if (!user.googleId && googleId) {
+      user.googleId = googleId;
+      user.provider = 'google';
+      changed = true;
+    }
+    if (!user.avatarUrl && avatarUrl) {
+      user.avatarUrl = avatarUrl;
+      changed = true;
+    }
+    if (!user.fullName && fullName) {
+      user.fullName = fullName;
+      changed = true;
+    }
+    if (changed) await user.save();
+    return user;
+  }
+
+  const baseUsername =
+    email ? email.split('@')[0] : (fullName || `gg_${googleId || crypto.randomInt(1000, 9999)}`);
+  const uniqueUsername = await generateUniqueUsername(baseUsername);
+
+  user = await User.create({
+    username: uniqueUsername,
+    email: (email || `${uniqueUsername}@google.local`).toLowerCase(),
+    fullName: fullName || '',
+    address: '',
+    phone: undefined,
+    provider: 'google',
+    googleId: googleId || undefined,
+    avatarUrl: avatarUrl || undefined,
+  });
+
+  return user;
+}

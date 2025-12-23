@@ -56,4 +56,41 @@ router.get(
 	},
 );
 
+// ---- Google OAuth ----
+router.get('/google', (req, res, next) => {
+	const opts = { scope: ['profile', 'email'] };
+	if (req.query.state) {
+		opts.state = req.query.state;
+	}
+	return passport.authenticate('google', opts)(req, res, next);
+});
+router.get(
+	'/google/callback',
+	passport.authenticate('google', {
+		session: false,
+		failureRedirect: `${FRONTEND_URL}/login?error=google`,
+	}),
+	(req, res) => {
+		try {
+			const user = req.user;
+			const token = signToken(user);
+			const payload = {
+				id: user._id,
+				username: user.username,
+				email: user.email,
+				fullName: user.fullName,
+				address: user.address,
+				phone: user.phone,
+				role: user.role,
+			};
+			const encodedUser = encodeURIComponent(Buffer.from(JSON.stringify(payload)).toString('base64'));
+			const encodedToken = encodeURIComponent(token);
+			const state = req.query?.state ? `&state=${encodeURIComponent(req.query.state)}` : '';
+			return res.redirect(`${FRONTEND_URL}/auth/callback?token=${encodedToken}&user=${encodedUser}${state}`);
+		} catch {
+			return res.redirect(`${FRONTEND_URL}/login?error=google`);
+		}
+	},
+);
+
 export default router;
