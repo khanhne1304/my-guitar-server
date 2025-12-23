@@ -4,8 +4,9 @@ export const validateCreateOrder = [
   body('shippingAddress.fullName').notEmpty(),
   body('shippingAddress.phone').notEmpty(),
   body('shippingAddress.address').notEmpty(),
-  body('shippingAddress.city').notEmpty(),
-  body('shippingAddress.district').notEmpty(),
+  // city và district có thể trống trong trường hợp nhận tại cửa hàng
+  body('shippingAddress.city').optional(),
+  body('shippingAddress.district').optional(),
   // Cho phép client gửi items trực tiếp thay vì lấy từ cart trên server
   body('items').optional().isArray({ min: 1 }),
   body('items.*.product').optional().notEmpty(),
