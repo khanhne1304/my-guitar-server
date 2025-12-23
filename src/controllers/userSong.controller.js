@@ -309,4 +309,3 @@ export async function updateComparisonResult(req, res, next) {
   }
 }
 
-

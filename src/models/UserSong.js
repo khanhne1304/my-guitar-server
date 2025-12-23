@@ -70,4 +70,3 @@ userSongSchema.index({ isActive: 1 });
 
 export default mongoose.model('UserSong', userSongSchema);
 
-
