@@ -1,4 +1,5 @@
 import Coupon from '../models/Coupon.js';
+import mongoose from 'mongoose';
 
 export async function listCoupons() {
   return await Coupon.find().sort('-createdAt');
@@ -84,7 +85,8 @@ export async function deleteCoupon(id) {
   return await Coupon.findByIdAndDelete(id);
 }
 
-export async function applyCoupon(code, orderTotal) {
+// Validate coupon (không tăng usedCount) - dùng cho preview
+export async function validateCoupon(code, orderTotal) {
   const coupon = await getCouponByCode(code);
   if (!coupon || !coupon.isActive) throw new Error('INVALID_COUPON');
 
@@ -103,7 +105,8 @@ export async function applyCoupon(code, orderTotal) {
       discount = Math.min(discount, coupon.maxDiscount);
     }
   } else {
-    discount = coupon.amount;
+    // Fixed type: không được vượt quá orderTotal
+    discount = Math.min(coupon.amount, orderTotal);
   }
 
   return {
@@ -111,4 +114,63 @@ export async function applyCoupon(code, orderTotal) {
     finalTotal: Math.max(0, orderTotal - discount),
     coupon,
   };
+}
+
+// Apply coupon và tăng usedCount (dùng khi tạo order)
+export async function applyCoupon(code, orderTotal, session = null) {
+  const coupon = await getCouponByCode(code);
+  if (!coupon || !coupon.isActive) throw new Error('INVALID_COUPON');
+
+  const now = new Date();
+  if (coupon.startAt && coupon.startAt > now) throw new Error('NOT_STARTED');
+  if (coupon.endAt && coupon.endAt < now) throw new Error('EXPIRED');
+  if (coupon.minOrder > 0 && orderTotal < coupon.minOrder)
+    throw new Error('MIN_ORDER_NOT_MET');
+
+  // Kiểm tra và tăng usedCount với atomic operation
+  if (coupon.usageLimit > 0) {
+    // Sử dụng findOneAndUpdate để đảm bảo atomicity
+    const updated = await Coupon.findOneAndUpdate(
+      {
+        _id: coupon._id,
+        usedCount: { $lt: coupon.usageLimit }, // Chỉ update nếu chưa đạt limit
+      },
+      { $inc: { usedCount: 1 } },
+      { new: true, session }
+    );
+
+    if (!updated) {
+      throw new Error('USAGE_LIMIT_REACHED');
+    }
+  } else {
+    // Không giới hạn, chỉ tăng usedCount
+    await Coupon.findByIdAndUpdate(
+      coupon._id,
+      { $inc: { usedCount: 1 } },
+      { session }
+    );
+  }
+
+  let discount = 0;
+  if (coupon.type === 'percent') {
+    discount = (orderTotal * coupon.amount) / 100;
+    if (coupon.maxDiscount > 0) {
+      discount = Math.min(discount, coupon.maxDiscount);
+    }
+  } else {
+    // Fixed type: không được vượt quá orderTotal
+    discount = Math.min(coupon.amount, orderTotal);
+  }
+
+  return {
+    discount,
+    finalTotal: Math.max(0, orderTotal - discount),
+    coupon: coupon._id,
+    couponCode: coupon.code,
+  };
+}
+
+// Alias cho backward compatibility (dùng validateCoupon)
+export async function applyCouponForPreview(code, orderTotal) {
+  return await validateCoupon(code, orderTotal);
 }

@@ -19,7 +19,8 @@ export async function createOrderFromCart(req, res, next) {
       req.user.id,
       req.body.shippingAddress,
       req.body.paymentMethod,
-      req.body.items
+      req.body.items,
+      req.body.couponCode || null
     );
 
     res.status(201).json(order);
@@ -30,6 +31,16 @@ export async function createOrderFromCart(req, res, next) {
       return res.status(400).json({ message: 'Sản phẩm không hợp lệ' });
     if (e.message.startsWith('OUT_OF_STOCK'))
       return res.status(400).json({ message: `Thiếu hàng: ${e.message.split(':')[1]}` });
+    if (e.message === 'INVALID_COUPON')
+      return res.status(400).json({ message: 'Mã giảm giá không hợp lệ' });
+    if (e.message === 'NOT_STARTED')
+      return res.status(400).json({ message: 'Mã giảm giá chưa đến ngày bắt đầu' });
+    if (e.message === 'EXPIRED')
+      return res.status(400).json({ message: 'Mã giảm giá đã hết hạn' });
+    if (e.message === 'USAGE_LIMIT_REACHED')
+      return res.status(400).json({ message: 'Mã giảm giá đã hết lượt sử dụng' });
+    if (e.message === 'MIN_ORDER_NOT_MET')
+      return res.status(400).json({ message: 'Chưa đạt giá trị đơn tối thiểu cho mã giảm giá' });
     next(e);
   }
 }

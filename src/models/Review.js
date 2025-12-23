@@ -49,12 +49,15 @@ reviewSchema.statics.recalcProductRating = async function (productId) {
   }
 };
 
-// hook sau save/remove để cập nhật product
+// hook sau save để cập nhật product
 reviewSchema.post('save', function () {
   this.constructor.recalcProductRating(this.product);
 });
-reviewSchema.post('remove', function () {
-  this.constructor.recalcProductRating(this.product);
+// Hook cho findOneAndDelete (được sử dụng trong service)
+reviewSchema.post('findOneAndDelete', function (doc) {
+  if (doc) {
+    doc.constructor.recalcProductRating(doc.product);
+  }
 });
 
 export default mongoose.model('Review', reviewSchema);

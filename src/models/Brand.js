@@ -7,10 +7,10 @@ const schema = new mongoose.Schema(
     slug: { type: String, unique: true, index: true },
     country: { type: String, trim: true },
 
-    // Tham chiếu Category qua slug
+    // Tham chiếu Category qua ObjectId (nhất quán với các model khác)
     categories: [
       {
-        type: String,
+        type: mongoose.Schema.Types.ObjectId,
         ref: 'Category',
       },
     ],

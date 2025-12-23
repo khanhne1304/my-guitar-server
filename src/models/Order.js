@@ -36,6 +36,12 @@ const orderSchema = new mongoose.Schema(
       default: 'pending',
     },
     total: Number,
+    coupon: {
+      code: { type: String, trim: true, uppercase: true },
+      discount: { type: Number, default: 0 },
+      couponId: { type: mongoose.Schema.Types.ObjectId, ref: 'Coupon' },
+    },
+    subtotal: { type: Number }, // Tổng tiền trước khi giảm giá
     paidAt: Date,
     cancelReason: {
       type: String,

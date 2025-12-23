@@ -1,11 +1,5 @@
 import { Router } from 'express';
-import {
-  scorePracticeClip,
-  getAiPracticeHistory,
-  uploadPracticeAudio,
-  getUserAudioFiles,
-  listCloudinaryAudioFiles,
-} from '../controllers/ai.controller.js';
+import { compareAudio, compareTwoSongsAudio } from '../controllers/compareSong.controller.js';
 import { protect } from '../middlewares/auth.js';
 import { audioUpload } from '../middlewares/audioUpload.js';
 
@@ -31,16 +25,25 @@ function handleMulterError(err, req, res, next) {
   next();
 }
 
-router.post('/practice/score', protect, scorePracticeClip);
-router.get('/practice/history', protect, getAiPracticeHistory);
-router.get('/practice/audios', protect, getUserAudioFiles); // Lấy danh sách audio của user
-router.get('/practice/audios/cloudinary', protect, listCloudinaryAudioFiles); // Lấy từ Cloudinary (tất cả)
+// So sánh audio của user với bài hát gốc
 router.post(
-  '/practice/upload',
+  '/audio',
   protect,
   audioUpload.single('audio'),
   handleMulterError,
-  uploadPracticeAudio,
+  compareAudio,
+);
+
+// So sánh hai file audio trực tiếp
+router.post(
+  '/two-songs',
+  protect,
+  audioUpload.fields([
+    { name: 'audio1', maxCount: 1 },
+    { name: 'audio2', maxCount: 1 },
+  ]),
+  handleMulterError,
+  compareTwoSongsAudio,
 );
 
 export default router;

@@ -17,7 +17,6 @@ function fileFilter(_, file, cb) {
   }
 }
 
-// Sử dụng memory storage để upload lên Cloudinary
 const storage = multer.memoryStorage();
 
 export const audioUpload = multer({

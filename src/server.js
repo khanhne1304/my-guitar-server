@@ -76,8 +76,10 @@ import adminReviewRoutes from './routes/adminReview.routes.js';
 import adminNotificationRoutes from './routes/adminNotification.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
 import legatoRoutes from './routes/legato.routes.js';
-import aiRoutes from './routes/ai.routes.js';
 import chatRoutes from './routes/chat.routes.js';
+import referenceSongRoutes from './routes/referenceSong.routes.js';
+import compareRoutes from './routes/compare.routes.js';
+import userSongRoutes from './routes/userSong.routes.js';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
@@ -94,10 +96,13 @@ app.use('/api/admin/users', adminUserRoutes);
 app.use('/api/admin/coupons', adminCouponRoutes);
 app.use('/api/admin/reviews', adminReviewRoutes);
 app.use('/api/admin/notifications', adminNotificationRoutes);
+app.use('/api/admin/reference-songs', referenceSongRoutes);
+app.use('/api/reference-songs', referenceSongRoutes); // Public routes cho bài hát gốc
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/legato', legatoRoutes);
-app.use('/api/ai', aiRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/compare', compareRoutes);
+app.use('/api/user-songs', userSongRoutes);
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
 /** --------- ERRORS --------- **/
@@ -107,9 +112,34 @@ app.use(errorHandler);
 
 /** --------- START --------- **/
 const PORT = process.env.PORT || 4000;
-connectDB(process.env.MONGO_URI)
-  .then(() => app.listen(PORT, () => console.log('🚀 API on :' + PORT)))
-  .catch((err) => {
-    console.error('DB connect error', err);
+
+async function startServer() {
+  try {
+    // Kết nối database
+    await connectDB(process.env.MONGO_URI);
+    console.log('✅ Database connected');
+
+    // Start server
+    const server = app.listen(PORT, () => {
+      console.log('🚀 API on :' + PORT);
+    });
+
+    // Xử lý lỗi khi server không thể lắng nghe
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`❌ Port ${PORT} đã được sử dụng. Vui lòng:`);
+        console.error(`   1. Dừng process đang sử dụng port ${PORT}`);
+        console.error(`   2. Hoặc thay đổi PORT trong file .env`);
+        console.error(`   3. Trên Windows: netstat -ano | findstr :${PORT} để tìm PID, sau đó taskkill /PID <PID> /F`);
+      } else {
+        console.error('❌ Server error:', err);
+      }
+      process.exit(1);
+    });
+  } catch (err) {
+    console.error('❌ Server start error:', err);
     process.exit(1);
-  });
+  }
+}
+
+startServer();
