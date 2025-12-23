@@ -83,6 +83,7 @@ import chatRoutes from './routes/chat.routes.js';
 import referenceSongRoutes from './routes/referenceSong.routes.js';
 import compareRoutes from './routes/compare.routes.js';
 import userSongRoutes from './routes/userSong.routes.js';
+import storeRoutes from './routes/store.routes.js';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
@@ -106,6 +107,7 @@ app.use('/api/legato', legatoRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/compare', compareRoutes);
 app.use('/api/user-songs', userSongRoutes);
+app.use('/api/stores', storeRoutes);
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
 /** --------- ERRORS --------- **/
