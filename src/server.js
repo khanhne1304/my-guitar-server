@@ -5,11 +5,14 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
+import http from 'http';
+import { Server as SocketIOServer } from 'socket.io';
 import { connectDB } from './config/db.js';
 import favoriteRoutes from './routes/favorite.routes.js';
 import userRoutes from './routes/user.routes.js';
 import passport from 'passport';
 import './config/passport.js';
+import { registerPresence } from './realtime/presence.js';
 dotenv.config();
 const app = express();
 
@@ -84,6 +87,7 @@ import referenceSongRoutes from './routes/referenceSong.routes.js';
 import compareRoutes from './routes/compare.routes.js';
 import userSongRoutes from './routes/userSong.routes.js';
 import storeRoutes from './routes/store.routes.js';
+import forumRoutes from './routes/forum.routes.js';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
@@ -108,6 +112,7 @@ app.use('/api/chat', chatRoutes);
 app.use('/api/compare', compareRoutes);
 app.use('/api/user-songs', userSongRoutes);
 app.use('/api/stores', storeRoutes);
+app.use('/api/forum', forumRoutes);
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
 /** --------- ERRORS --------- **/
@@ -124,8 +129,20 @@ async function startServer() {
     await connectDB(process.env.MONGO_URI);
     console.log('✅ Database connected');
 
-    // Start server
-    const server = app.listen(PORT, () => {
+    // Start HTTP server (required for Socket.IO)
+    const server = http.createServer(app);
+
+    const io = new SocketIOServer(server, {
+      cors: {
+        origin: true,
+        credentials: true,
+        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      },
+      transports: ['websocket'],
+    });
+    registerPresence(io);
+
+    server.listen(PORT, () => {
       console.log('🚀 API on :' + PORT);
     });
 

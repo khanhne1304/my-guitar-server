@@ -28,6 +28,10 @@ const userSchema = new mongoose.Schema(
 		facebookId: { type: String, unique: true, sparse: true, index: true },
 		googleId: { type: String, unique: true, sparse: true, index: true },
 		avatarUrl: { type: String },
+		blocked: {
+			type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+			default: [],
+		},
 	},
 	{ timestamps: true },
 );
