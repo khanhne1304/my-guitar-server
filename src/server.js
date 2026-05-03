@@ -90,6 +90,8 @@ import userSongRoutes from './routes/userSong.routes.js';
 import storeRoutes from './routes/store.routes.js';
 import forumRoutes from './routes/forum.routes.js';
 import followRoutes from './routes/follow.routes.js';
+import learningRoutes from './routes/learning.routes.js';
+import courseLearningRoutes from './routes/courseLearning.routes.js';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
@@ -116,6 +118,8 @@ app.use('/api/user-songs', userSongRoutes);
 app.use('/api/stores', storeRoutes);
 app.use('/api/forum', forumRoutes);
 app.use('/api/follow', followRoutes);
+app.use('/api/learning', learningRoutes);
+app.use('/api', courseLearningRoutes);
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
 /** --------- ERRORS --------- **/

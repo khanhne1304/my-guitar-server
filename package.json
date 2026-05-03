@@ -9,6 +9,7 @@
     "seed:admin": "node scripts/seedAdmin.js",
     "seed:coupons": "node src/scripts/seedCoupons.js",
     "seed:stores": "node src/scripts/seedStores.js",
+    "seed:course": "node src/scripts/seedBeginnerCourse.js",
     "create:folders": "node scripts/create-cloudinary-folders.js",
     "create:folders:force": "node scripts/create-cloudinary-folders-with-placeholder.js",
     "create:folders:keep": "node scripts/create-cloudinary-folders-keep.js",

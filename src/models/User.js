@@ -22,7 +22,11 @@ const userSchema = new mongoose.Schema(
 			},
 			select: false,
 		},
-		role: { type: String, enum: ['user', 'admin'], default: 'user' },
+		role: {
+			type: String,
+			enum: ['user', 'student', 'instructor', 'admin'],
+			default: 'user',
+		},
 		// --- Social login fields ---
 		provider: { type: String, enum: ['local', 'facebook', 'google'], default: 'local', index: true },
 		facebookId: { type: String, unique: true, sparse: true, index: true },
@@ -40,6 +44,15 @@ const userSchema = new mongoose.Schema(
 			type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
 			default: [],
 		},
+		/** Lộ trình học guitar */
+		guitarOnboardingCompleted: { type: Boolean, default: false },
+		guitarGoals: { type: [String], default: [] },
+		guitarLevel: {
+			type: String,
+			enum: ['none', 'basic', 'advanced'],
+			default: 'none',
+		},
+		guitarPlacementAnswers: { type: mongoose.Schema.Types.Mixed, default: null },
 	},
 	{ timestamps: true },
 );

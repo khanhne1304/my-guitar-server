@@ -10,7 +10,15 @@ export async function updateUserProfile(userId, data) {
   if ('password' in data) delete data.password;
 
   // Chỉ lấy những field được phép sửa
-  const allowedFields = ['username', 'email', 'fullName', 'address', 'phone'];
+  const allowedFields = [
+    'username',
+    'email',
+    'fullName',
+    'address',
+    'phone',
+    'guitarOnboardingCompleted',
+    'guitarGoals',
+  ];
   const updates = {};
   for (const key of allowedFields) {
     if (data[key] !== undefined) updates[key] = data[key];

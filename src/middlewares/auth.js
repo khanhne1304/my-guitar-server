@@ -51,6 +51,13 @@ export async function admin(req, res, next) {
   next();
 }
 
+/** Giảng viên hoặc admin — tạo / sửa khóa học */
+export function instructorOrAdmin(req, res, next) {
+  const r = req.user?.role;
+  if (r === 'instructor' || r === 'admin') return next();
+  return res.status(403).json({ message: 'Chỉ giảng viên hoặc admin mới thực hiện được thao tác này' });
+}
+
 /**
  * Optional JWT: sets req.user when Bearer token valid; otherwise req.user = null.
  * Used for public routes that need visibility rules (e.g. forum thread lists).
