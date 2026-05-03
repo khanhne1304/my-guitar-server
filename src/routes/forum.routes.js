@@ -1,6 +1,8 @@
 import { Router } from 'express';
-import { admin, protect } from '../middlewares/auth.js';
+import { admin, optionalAuth, protect } from '../middlewares/auth.js';
 import { forumUpload } from '../middlewares/forumUpload.js';
+import { validateGuitarContent } from '../middlewares/validateGuitarContent.js';
+import { validateImageContent } from '../middlewares/validateImageContent.js';
 import {
   listThreads,
   createThread,
@@ -25,12 +27,12 @@ import {
 const router = Router();
 
 // Threads
-router.get('/threads', listThreads);
-router.post('/threads', protect, createThread);
-router.post('/uploads', protect, forumUpload.single('file'), uploadThreadFile);
-router.get('/threads/:id', getThread);
+router.get('/threads', optionalAuth, listThreads);
+router.post('/threads', protect, validateGuitarContent, createThread);
+router.post('/uploads', protect, forumUpload.single('file'), validateImageContent, uploadThreadFile);
+router.get('/threads/:id', optionalAuth, getThread);
 router.delete('/threads/:id', protect, deleteThread);
-router.get('/threads/:id/answers', listAnswers);
+router.get('/threads/:id/answers', optionalAuth, listAnswers);
 
 // Answers
 router.post('/answers', protect, createAnswer);

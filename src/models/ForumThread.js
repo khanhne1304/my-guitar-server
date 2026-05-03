@@ -28,6 +28,8 @@ const forumThreadSchema = new mongoose.Schema(
     ],
     videoUrl: { type: String, trim: true, default: '' },
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    /** True when image could not be verified by Vision (no key / error) and text keywords did not clear review */
+    needsReview: { type: Boolean, default: false, index: true },
     bestAnswer: { type: mongoose.Schema.Types.ObjectId, ref: 'ForumAnswer', default: null },
     // Backward-compat for older clients; prefer `files` + `videoUrl`.
     mediaUrl: { type: String, trim: true, default: '' },

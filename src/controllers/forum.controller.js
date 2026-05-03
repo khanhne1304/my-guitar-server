@@ -6,24 +6,17 @@ import ForumAnswerLike from '../models/ForumAnswerLike.js';
 import ForumReport from '../models/ForumReport.js';
 import mongoose from 'mongoose';
 import { uploadFileToCloudinary } from '../utils/cloudinary.js';
+import { notifyForumEvent } from '../services/forumRealtime.service.js';
+import { onThreadLiked, onBestAnswerChosen } from '../services/reputation.service.js';
+import { MSG_IMAGE_PENDING } from '../services/guitarValidation/imageVisionValidation.js';
+
+/** Display name for notification previews */
+function actorLabel(req) {
+  return String(req.user?.fullName || '').trim() || String(req.user?.username || '').trim() || 'Thành viên';
+}
 
 const THREAD_CATEGORIES = ['lesson', 'tab', 'chord', 'discussion'];
 const ALLOWED_FILE_TYPES = new Set(['pdf', 'image', 'audio']);
-const guitarKeywords = [
-  'guitar',
-  'đàn',
-  'chord',
-  'tab',
-  'fingerstyle',
-  'strumming',
-  'hợp âm',
-  'scale',
-];
-
-function isGuitarContent(text) {
-  const s = String(text || '').toLowerCase();
-  return guitarKeywords.some((k) => s.includes(String(k).toLowerCase()));
-}
 
 function isValidYoutube(url) {
   const s = String(url || '').trim().toLowerCase();
@@ -65,6 +58,33 @@ function parseListParam(v) {
     .filter(Boolean);
 }
 
+/** Threads pending review: hidden for anonymous & others; visible to author & admin */
+function needsReviewVisibilityClause(viewer) {
+  if (viewer?.role === 'admin') return {};
+  const uid = viewer?._id || viewer?.id;
+  if (!uid) {
+    return { needsReview: { $ne: true } };
+  }
+  return {
+    $or: [{ needsReview: { $ne: true } }, { user: uid }],
+  };
+}
+
+function mergeThreadFilters(baseFilter, viewer) {
+  const vis = needsReviewVisibilityClause(viewer);
+  const hasBase = baseFilter && Object.keys(baseFilter).length > 0;
+  if (!hasBase) return vis;
+  return { $and: [baseFilter, vis] };
+}
+
+export function canViewNeedsReviewThread(threadDoc, viewer) {
+  if (!threadDoc?.needsReview) return true;
+  if (viewer?.role === 'admin') return true;
+  const vid = viewer?._id || viewer?.id;
+  if (!vid) return false;
+  return String(threadDoc.user) === String(vid);
+}
+
 export async function listThreads(req, res, next) {
   try {
     const { category, type, q, sort = 'newest' } = req.query;
@@ -84,12 +104,14 @@ export async function listThreads(req, res, next) {
       ];
     }
 
+    const matchFilter = mergeThreadFilters(filter, req.user);
+
     const sortValue = String(sort || 'newest');
 
     // For top/unanswered we need computed fields (likes + answer count), so use aggregation.
     if (sortValue === 'top' || sortValue === 'unanswered') {
       const pipeline = [
-        { $match: filter },
+        { $match: matchFilter },
         {
           $lookup: {
             from: 'forumlikes',
@@ -148,6 +170,7 @@ export async function listThreads(req, res, next) {
             updatedAt: 1,
             likeCount: 1,
             answersCount: 1,
+            needsReview: 1,
             user: {
               _id: '$userObj._id',
               username: '$userObj.username',
@@ -171,7 +194,7 @@ export async function listThreads(req, res, next) {
 
     // newest/oldest can use simple find
     const sortObj = sortValue === 'oldest' ? { createdAt: 1 } : { createdAt: -1 };
-    const items = await ForumThread.find(filter)
+    const items = await ForumThread.find(matchFilter)
       .populate('user', 'username fullName avatarUrl')
       .populate('bestAnswer', '_id')
       .sort(sortObj)
@@ -215,11 +238,6 @@ export async function createThread(req, res, next) {
       return res.status(400).json({ message: 'category is invalid' });
     }
 
-    // Enforce guitar-related content
-    if (!isGuitarContent(`${title} ${content}`)) {
-      return res.status(400).json({ message: 'Nội dung phải liên quan đến guitar' });
-    }
-
     const normalizedVideoUrl = videoUrl ? String(videoUrl).trim() : '';
     if (normalizedVideoUrl && !isValidYoutube(normalizedVideoUrl)) {
       return res.status(400).json({ message: 'Link YouTube không hợp lệ' });
@@ -252,6 +270,7 @@ export async function createThread(req, res, next) {
       videoUrl: normalizedVideoUrl,
       mediaUrl: normalizedMediaUrl,
       user: req.user.id,
+      needsReview: Boolean(req.forumThreadMeta?.needsReview),
     });
 
     const populated = await ForumThread.findById(doc._id).populate('user', 'username fullName avatarUrl');
@@ -269,12 +288,6 @@ export async function uploadThreadFile(req, res, next) {
     const { buffer, originalname, mimetype } = file;
     if (!buffer || !originalname) return res.status(400).json({ message: 'file is invalid' });
 
-    // Bonus: basic filename check (soft reject -> still reject to enforce guitar focus)
-    const nameLower = String(originalname).toLowerCase();
-    if (!nameLower.includes('guitar') && !nameLower.includes('đàn')) {
-      return res.status(400).json({ message: 'Tên file phải liên quan đến guitar' });
-    }
-
     const result = await uploadFileToCloudinary(buffer, originalname, { folder: 'forum', mimetype });
     const url = result?.secure_url || '';
     if (!url) return res.status(500).json({ message: 'Upload failed' });
@@ -282,7 +295,12 @@ export async function uploadThreadFile(req, res, next) {
     const mt = String(mimetype || '').toLowerCase();
     const type = mt === 'application/pdf' ? 'pdf' : mt.startsWith('image/') ? 'image' : 'audio';
 
-    res.status(201).json({ url, type, originalname });
+    const payload = { url, type, originalname };
+    if (req.forumUploadPendingReview && type === 'image') {
+      payload.pendingReview = true;
+      payload.message = MSG_IMAGE_PENDING;
+    }
+    res.status(201).json(payload);
   } catch (e) {
     next(e);
   }
@@ -328,6 +346,7 @@ export async function getThread(req, res, next) {
           createdAt: 1,
           updatedAt: 1,
           likeCount: 1,
+          needsReview: 1,
           user: {
             _id: '$userObj._id',
             username: '$userObj.username',
@@ -341,6 +360,16 @@ export async function getThread(req, res, next) {
     const rows = await ForumThread.aggregate(pipeline);
     const thread = rows?.[0] || null;
     if (!thread) return res.status(404).json({ message: 'Not found' });
+
+    const ownerId = thread.user?._id || thread.user;
+    if (
+      !canViewNeedsReviewThread({ needsReview: thread.needsReview, user: ownerId }, req.user)
+    ) {
+      return res.status(403).json({
+        message: 'Bài viết đang chờ kiểm duyệt hoặc không khả dụng.',
+        code: 'PENDING_REVIEW',
+      });
+    }
 
     res.json(thread);
   } catch (e) {
@@ -381,6 +410,15 @@ export async function listAnswers(req, res, next) {
     const threadId = req.params.id;
     const oid = mongoose.Types.ObjectId.isValid(threadId) ? new mongoose.Types.ObjectId(threadId) : null;
     if (!oid) return res.status(400).json({ message: 'Invalid thread id' });
+
+    const threadDoc = await ForumThread.findById(oid).select('needsReview user').lean();
+    if (!threadDoc) return res.status(404).json({ message: 'Not found' });
+    if (!canViewNeedsReviewThread(threadDoc, req.user)) {
+      return res.status(403).json({
+        message: 'Bài viết đang chờ kiểm duyệt hoặc không khả dụng.',
+        code: 'PENDING_REVIEW',
+      });
+    }
 
     const pipeline = [
       { $match: { thread: oid } },
@@ -447,6 +485,24 @@ export async function createAnswer(req, res, next) {
     const populated = await ForumAnswer.findById(ans._id).populate('user', 'username fullName avatarUrl');
     const obj = populated?.toObject ? populated.toObject() : populated;
     if (obj) obj.likeCount = 0;
+
+    // Realtime + inbox: notify thread owner about new answer
+    try {
+      const th = await ForumThread.findById(threadId).select('user title').lean();
+      const ownerId = th?.user;
+      await notifyForumEvent({
+        recipientId: ownerId,
+        actorId: req.user._id || req.user.id,
+        eventType: 'new_reply',
+        threadId,
+        title: 'Trả lời mới trong chủ đề của bạn',
+        preview: `${actorLabel(req)} đã trả lời "${String(th?.title || '').slice(0, 120)}".`,
+        answerId: ans._id,
+      });
+    } catch (err) {
+      console.error('forum notify new_reply', err);
+    }
+
     res.status(201).json(obj);
   } catch (e) {
     next(e);
@@ -530,6 +586,24 @@ export async function toggleAnswerLike(req, res, next) {
       liked = true;
     }
 
+    if (liked) {
+      try {
+        const ans = await ForumAnswer.findById(oid).select('user thread').lean();
+        const th = await ForumThread.findById(ans.thread).select('title').lean();
+        await notifyForumEvent({
+          recipientId: ans?.user,
+          actorId: req.user._id || req.user.id,
+          eventType: 'new_like',
+          threadId: ans.thread,
+          title: 'Ai đó thích câu trả lời của bạn',
+          preview: `${actorLabel(req)} thích câu trả lời của bạn trong "${String(th?.title || '').slice(0, 80)}…".`,
+          answerId: oid,
+        });
+      } catch (err) {
+        console.error('forum notify answer like', err);
+      }
+    }
+
     const likeCount = await ForumAnswerLike.countDocuments({ answer: oid });
     res.json({ likeCount, liked });
   } catch (e) {
@@ -559,6 +633,12 @@ export async function markBestAnswer(req, res, next) {
     thread.bestAnswer = ans._id;
     await thread.save();
 
+    try {
+      await onBestAnswerChosen(String(ans.user));
+    } catch (err) {
+      console.error('forum karma best answer', err);
+    }
+
     const populatedAnswer = await ForumAnswer.findById(ans._id).populate('user', 'username fullName avatarUrl');
     const populatedThread = await ForumThread.findById(thread._id)
       .populate('user', 'username fullName avatarUrl')
@@ -586,6 +666,24 @@ export async function createReply(req, res, next) {
     });
 
     const populated = await ForumReply.findById(rep._id).populate('user', 'username fullName avatarUrl');
+
+    try {
+      const ansFull = await ForumAnswer.findById(answerId).select('user thread').lean();
+      const th = await ForumThread.findById(ansFull.thread).select('title').lean();
+      await notifyForumEvent({
+        recipientId: ansFull?.user,
+        actorId: req.user._id || req.user.id,
+        eventType: 'reply_to_reply',
+        threadId: ansFull.thread,
+        title: 'Phản hồi mới cho bình luận của bạn',
+        preview: `${actorLabel(req)} đã phản hồi trong "${String(th?.title || '').slice(0, 80)}…".`,
+        answerId,
+        replyId: rep._id,
+      });
+    } catch (err) {
+      console.error('forum notify reply_to_reply', err);
+    }
+
     res.status(201).json(populated);
   } catch (e) {
     next(e);
@@ -669,6 +767,30 @@ export async function toggleLike(req, res, next) {
     } else {
       await ForumLike.create({ user: req.user.id, thread: oid });
       liked = true;
+    }
+
+    try {
+      const th = await ForumThread.findById(oid).select('user title').lean();
+      const ownerId = th?.user ? String(th.user) : null;
+      const selfId = String(req.user._id || req.user.id);
+      // Không cộng karma / push notify khi tự thích bài của chính mình
+      if (ownerId && ownerId !== selfId) {
+        if (liked) {
+          await onThreadLiked(ownerId, true);
+          await notifyForumEvent({
+            recipientId: ownerId,
+            actorId: req.user._id || req.user.id,
+            eventType: 'new_like',
+            threadId: oid,
+            title: 'Có lượt thích mới',
+            preview: `${actorLabel(req)} thích chủ đề "${String(th?.title || '').slice(0, 100)}".`,
+          });
+        } else {
+          await onThreadLiked(ownerId, false);
+        }
+      }
+    } catch (err) {
+      console.error('forum thread like karma/notify', err);
     }
 
     const likeCount = await ForumLike.countDocuments({ thread: oid });

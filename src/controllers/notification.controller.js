@@ -8,6 +8,7 @@ import {
   getUnreadCountForUser,
   markAsRead,
   markAllAsRead,
+  hideForumNotification,
 } from '../services/notification.service.js';
 
 export async function listAdmin(req, res, next) {
@@ -111,6 +112,17 @@ export async function markAllNotificationsAsRead(req, res, next) {
     const userId = req.user.id;
     await markAllAsRead(userId);
     res.json({ message: 'Đã đánh dấu tất cả thông báo đã đọc' });
+  } catch (e) {
+    next(e);
+  }
+}
+
+/** Ẩn một thông báo diễn đàn (forum inbox); broadcast system notifications không hỗ trợ ẩn */
+export async function hideUserNotification(req, res, next) {
+  try {
+    const doc = await hideForumNotification(req.user.id, req.params.id);
+    if (!doc) return res.status(404).json({ message: 'Không tìm thấy hoặc không thể ẩn' });
+    res.json({ ok: true });
   } catch (e) {
     next(e);
   }

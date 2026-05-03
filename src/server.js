@@ -13,6 +13,7 @@ import userRoutes from './routes/user.routes.js';
 import passport from 'passport';
 import './config/passport.js';
 import { registerPresence } from './realtime/presence.js';
+import { setIO } from './lib/ioRegistry.js';
 dotenv.config();
 const app = express();
 
@@ -88,6 +89,7 @@ import compareRoutes from './routes/compare.routes.js';
 import userSongRoutes from './routes/userSong.routes.js';
 import storeRoutes from './routes/store.routes.js';
 import forumRoutes from './routes/forum.routes.js';
+import followRoutes from './routes/follow.routes.js';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
@@ -113,6 +115,7 @@ app.use('/api/compare', compareRoutes);
 app.use('/api/user-songs', userSongRoutes);
 app.use('/api/stores', storeRoutes);
 app.use('/api/forum', forumRoutes);
+app.use('/api/follow', followRoutes);
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
 /** --------- ERRORS --------- **/
@@ -140,6 +143,7 @@ async function startServer() {
       },
       transports: ['websocket'],
     });
+    setIO(io);
     registerPresence(io);
 
     server.listen(PORT, () => {

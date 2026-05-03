@@ -28,7 +28,12 @@ export function registerPresence(io) {
 
   io.on('connection', (socket) => {
     const uid = socket?.data?.userId;
-    if (uid) socketUser.set(socket.id, String(uid));
+    if (uid) {
+      const idStr = String(uid);
+      socketUser.set(socket.id, idStr);
+      // Personal room for forum / notification fan-out
+      socket.join(`user:${idStr}`);
+    }
     broadcastOnline();
 
     socket.on('disconnect', () => {
