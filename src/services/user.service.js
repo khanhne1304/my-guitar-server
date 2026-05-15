@@ -16,8 +16,6 @@ export async function updateUserProfile(userId, data) {
     'fullName',
     'address',
     'phone',
-    'guitarOnboardingCompleted',
-    'guitarGoals',
   ];
   const updates = {};
   for (const key of allowedFields) {

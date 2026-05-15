@@ -90,8 +90,14 @@ import userSongRoutes from './routes/userSong.routes.js';
 import storeRoutes from './routes/store.routes.js';
 import forumRoutes from './routes/forum.routes.js';
 import followRoutes from './routes/follow.routes.js';
-import learningRoutes from './routes/learning.routes.js';
-import courseLearningRoutes from './routes/courseLearning.routes.js';
+import coursesRoutes from './routes/courses.routes.js';
+import modulesRoutes from './routes/modules.routes.js';
+import lessonsRoutes from './routes/lessons.routes.js';
+import quizzesRoutes from './routes/quizzes.routes.js';
+import progressRoutes from './routes/progress.routes.js';
+import practiceRoutes from './routes/practice.routes.js';
+import challengeRoutes from './routes/challenge.routes.js';
+import dashboardRoutes from './routes/dashboard.routes.js';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
@@ -118,8 +124,14 @@ app.use('/api/user-songs', userSongRoutes);
 app.use('/api/stores', storeRoutes);
 app.use('/api/forum', forumRoutes);
 app.use('/api/follow', followRoutes);
-app.use('/api/learning', learningRoutes);
-app.use('/api', courseLearningRoutes);
+app.use('/api/courses', coursesRoutes);
+app.use('/api/modules', modulesRoutes);
+app.use('/api/lessons', lessonsRoutes);
+app.use('/api/quizzes', quizzesRoutes);
+app.use('/api/progress', progressRoutes);
+app.use('/api/practice-routines', practiceRoutes);
+app.use('/api/challenge-songs', challengeRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
 /** --------- ERRORS --------- **/
