@@ -6,23 +6,23 @@ import ReferenceSong from '../models/ReferenceSong.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const serverRoot = path.resolve(__dirname, '..', '..');
-const defaultAiRoot = path.resolve(serverRoot, '..', 'my-guitar-ai-service');
+const serverRoot = path.join(__dirname, '..', '..');
+const defaultCompareRoot = path.join(serverRoot, '..', 'compare-two-song');
 
 function resolvePath(envKey, defaultPath) {
-  return process.env[envKey] ? path.resolve(process.env[envKey]) : defaultPath;
+  return process.env[envKey] ? process.env[envKey] : defaultPath;
 }
 
 const compareConfig = {
   pythonBin: process.env.AI_PYTHON_BIN || 'python',
   compareScriptPath: resolvePath(
     'COMPARE_SCRIPT',
-    path.join(defaultAiRoot, 'Compare_Song', 'compare_two_song.py'),
+    path.join(defaultCompareRoot, 'compare_two_song.py'),
   ),
   workingDir: process.env.AI_WORKDIR
-    ? path.resolve(process.env.AI_WORKDIR)
-    : path.join(defaultAiRoot, 'Compare_Song'),
-  tempDir: path.resolve(serverRoot, 'tmp', 'compare-audio'),
+    ? process.env.AI_WORKDIR
+    : defaultCompareRoot,
+  tempDir: path.join(serverRoot, 'tmp', 'compare-audio'),
 };
 
 // Đảm bảo thư mục temp tồn tại
@@ -76,17 +76,16 @@ export async function compareTwoSongs(refAudioPath, perfAudioPath, options = {})
   console.log(`   - Python: ${compareConfig.pythonBin}`);
 
   return new Promise((resolve, reject) => {
-    // Đảm bảo đường dẫn file được normalize và escape đúng cách
-    // Sử dụng path.resolve để đảm bảo đường dẫn tuyệt đối
-    const normalizedRefPath = path.resolve(refAudioPath);
-    const normalizedPerfPath = path.resolve(perfAudioPath);
+    // Sử dụng đường dẫn tương đối hoặc đường dẫn gốc được cung cấp
+    const normalizedRefPath = refAudioPath;
+    const normalizedPerfPath = perfAudioPath;
     
     // Kiểm tra lại sau khi normalize
     if (!fs.existsSync(normalizedRefPath)) {
-      return reject(new Error(`File bản chuẩn không tồn tại sau khi normalize: ${normalizedRefPath}`));
+      return reject(new Error(`File bản chuẩn không tồn tại: ${normalizedRefPath}`));
     }
     if (!fs.existsSync(normalizedPerfPath)) {
-      return reject(new Error(`File bản chơi không tồn tại sau khi normalize: ${normalizedPerfPath}`));
+      return reject(new Error(`File bản chơi không tồn tại: ${normalizedPerfPath}`));
     }
     
     const args = [

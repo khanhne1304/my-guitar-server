@@ -81,6 +81,48 @@ export async function uploadAudioToCloudinary(buffer, originalname, folder = nul
 }
 
 /**
+ * Upload file buffer (image/pdf/audio/...) lên Cloudinary.
+ * - image/*  => resource_type: 'image'
+ * - audio/*  => resource_type: 'video' (Cloudinary dùng 'video' cho audio)
+ * - còn lại  => resource_type: 'raw' (vd: pdf)
+ */
+export async function uploadFileToCloudinary(buffer, originalname, { folder = null, mimetype = '' } = {}) {
+  configureCloudinary();
+
+  const mt = String(mimetype || '').toLowerCase();
+  const resourceType = mt.startsWith('image/')
+    ? 'image'
+    : mt.startsWith('audio/')
+      ? 'video'
+      : 'raw';
+
+  return new Promise((resolve, reject) => {
+    const timestamp = Date.now();
+    const safeOriginal = originalname.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9._-]/g, '');
+    const nameWithoutExt = safeOriginal.replace(/\.[^/.]+$/, '');
+    const publicId = `${timestamp}-${nameWithoutExt}`;
+
+    const uploadOptions = {
+      resource_type: resourceType,
+      public_id: publicId,
+      overwrite: false,
+    };
+
+    if (folder && String(folder).trim() !== '') {
+      uploadOptions.folder = String(folder).trim();
+    }
+
+    const uploadStream = cloudinary.uploader.upload_stream(uploadOptions, (error, result) => {
+      if (error) return reject(error);
+      if (!result) return reject(new Error('Upload thất bại: không nhận được kết quả từ Cloudinary'));
+      resolve(result);
+    });
+
+    streamifier.createReadStream(buffer).pipe(uploadStream);
+  });
+}
+
+/**
  * Xóa file từ Cloudinary
  * @param {string} publicId - Public ID của file trên Cloudinary
  * @returns {Promise<Object>} Kết quả xóa

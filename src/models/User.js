@@ -22,12 +22,28 @@ const userSchema = new mongoose.Schema(
 			},
 			select: false,
 		},
-		role: { type: String, enum: ['user', 'admin'], default: 'user' },
+		role: {
+			type: String,
+			enum: ['user', 'student', 'instructor', 'admin'],
+			default: 'user',
+		},
 		// --- Social login fields ---
 		provider: { type: String, enum: ['local', 'facebook', 'google'], default: 'local', index: true },
 		facebookId: { type: String, unique: true, sparse: true, index: true },
 		googleId: { type: String, unique: true, sparse: true, index: true },
 		avatarUrl: { type: String },
+		/** Forum reputation (karma) — adjusted by likes / best answer */
+		forumKarma: { type: Number, default: 0, min: 0 },
+		/** Derived from forumKarma thresholds in reputation.service */
+		forumBadge: {
+			type: String,
+			enum: ['beginner', 'intermediate', 'pro'],
+			default: 'beginner',
+		},
+		blocked: {
+			type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+			default: [],
+		},
 	},
 	{ timestamps: true },
 );

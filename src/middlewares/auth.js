@@ -50,3 +50,35 @@ export async function admin(req, res, next) {
   }
   next();
 }
+
+/** Giảng viên hoặc admin — tạo / sửa khóa học */
+export function instructorOrAdmin(req, res, next) {
+  const r = req.user?.role;
+  if (r === 'instructor' || r === 'admin') return next();
+  return res.status(403).json({ message: 'Chỉ giảng viên hoặc admin mới thực hiện được thao tác này' });
+}
+
+/**
+ * Optional JWT: sets req.user when Bearer token valid; otherwise req.user = null.
+ * Used for public routes that need visibility rules (e.g. forum thread lists).
+ */
+export async function optionalAuth(req, res, next) {
+  try {
+    if (!process.env.JWT_SECRET) {
+      req.user = null;
+      return next();
+    }
+    const header = req.headers.authorization || '';
+    const token = header.startsWith('Bearer ') ? header.split(' ')[1] : null;
+    if (!token) {
+      req.user = null;
+      return next();
+    }
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findById(payload.id).select('-password');
+    req.user = user || null;
+  } catch {
+    req.user = null;
+  }
+  next();
+}

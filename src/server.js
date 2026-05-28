@@ -1,16 +1,19 @@
 // server.js
+import './loadEnv.js';
 import express from 'express';
-import dotenv from 'dotenv';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
+import http from 'http';
+import { Server as SocketIOServer } from 'socket.io';
 import { connectDB } from './config/db.js';
 import favoriteRoutes from './routes/favorite.routes.js';
 import userRoutes from './routes/user.routes.js';
 import passport from 'passport';
 import './config/passport.js';
-dotenv.config();
+import { registerPresence } from './realtime/presence.js';
+import { setIO } from './lib/ioRegistry.js';
 const app = express();
 
 /** --------- CORS CONFIG --------- **/
@@ -82,8 +85,21 @@ import legatoRoutes from './routes/legato.routes.js';
 import chatRoutes from './routes/chat.routes.js';
 import referenceSongRoutes from './routes/referenceSong.routes.js';
 import compareRoutes from './routes/compare.routes.js';
+import hopamRoutes from './routes/hopam.routes.js';
+import chordPracticeRoutes from './routes/chordPractice.routes.js';
 import userSongRoutes from './routes/userSong.routes.js';
 import storeRoutes from './routes/store.routes.js';
+import forumRoutes from './routes/forum.routes.js';
+import followRoutes from './routes/follow.routes.js';
+import coursesRoutes from './routes/courses.routes.js';
+import modulesRoutes from './routes/modules.routes.js';
+import lessonsRoutes from './routes/lessons.routes.js';
+import quizzesRoutes from './routes/quizzes.routes.js';
+import progressRoutes from './routes/progress.routes.js';
+import practiceRoutes from './routes/practice.routes.js';
+import challengeRoutes from './routes/challenge.routes.js';
+import dashboardRoutes from './routes/dashboard.routes.js';
+import messageRoutes from './routes/message.routes.js';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
@@ -106,8 +122,21 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/legato', legatoRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/compare', compareRoutes);
+app.use('/api/hopam', hopamRoutes);
+app.use('/api/chord-practice', chordPracticeRoutes);
 app.use('/api/user-songs', userSongRoutes);
 app.use('/api/stores', storeRoutes);
+app.use('/api/forum', forumRoutes);
+app.use('/api/follow', followRoutes);
+app.use('/api/courses', coursesRoutes);
+app.use('/api/modules', modulesRoutes);
+app.use('/api/lessons', lessonsRoutes);
+app.use('/api/quizzes', quizzesRoutes);
+app.use('/api/progress', progressRoutes);
+app.use('/api/practice-routines', practiceRoutes);
+app.use('/api/challenge-songs', challengeRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/messages', messageRoutes);
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
 /** --------- ERRORS --------- **/
@@ -124,8 +153,21 @@ async function startServer() {
     await connectDB(process.env.MONGO_URI);
     console.log('✅ Database connected');
 
-    // Start server
-    const server = app.listen(PORT, () => {
+    // Start HTTP server (required for Socket.IO)
+    const server = http.createServer(app);
+
+    const io = new SocketIOServer(server, {
+      cors: {
+        origin: true,
+        credentials: true,
+        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      },
+      transports: ['websocket'],
+    });
+    setIO(io);
+    registerPresence(io);
+
+    server.listen(PORT, () => {
       console.log('🚀 API on :' + PORT);
     });
 

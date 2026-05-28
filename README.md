@@ -85,3 +85,54 @@ Notes:
 - Returns the latest saved sessions plus aggregate stats (session count, average / best `overall_score`).
 
 All endpoints are protected with the existing `protect` middleware so they use the logged-in user ID to enrich metadata and store history.
+
+### HopAmChuan proxy & Chord practice
+
+| Endpoint | Auth | Description |
+| --- | --- | --- |
+| `GET /api/hopam/search?q=` | No | Tìm bài trên hopamchuan.com |
+| `GET /api/hopam/song?url=` | No | Lấy hợp âm + lời bài hát |
+| `POST /api/chord-practice/analyze` | Yes | Upload audio + `hopamUrl` → nhận diện hợp âm & so sánh |
+| `POST /api/chord-practice/analyze-only` | Yes | Chỉ nhận diện hợp âm |
+
+### Nhận diện hợp âm (ChordMini)
+
+**Hướng dẫn cài đặt đầy đủ (bắt buộc ChordMini):** xem [CHORDMINI_SETUP.md](./CHORDMINI_SETUP.md)
+
+**ChordMini (Docker, khuyến nghị):**
+
+```powershell
+cd "d:\New folder\my-guitar-server"
+powershell -ExecutionPolicy Bypass -File .\scripts\start-chordmini-docker.ps1
+```
+
+Dừng: `.\scripts\stop-chordmini-docker.ps1` — API: `http://localhost:5001`
+
+| Biến | Giá trị | Mô tả |
+| --- | --- | --- |
+| `CHORDMINI_API_URL` | `http://localhost:5001` | ChordMini Docker local — **không** dùng `https://www.chordmini.me` |
+| `CHORDMINI_MODEL` | `chord-cnn-lstm` | Model nhận diện |
+
+Nhận diện hợp âm **chỉ** qua ChordMini. Phân tích `/api/chord-practice/analyze` còn gọi `detect-beats` để so sánh BPM với HopAmChuan.
+
+| Biến | Mô tả |
+| --- | --- |
+| `CHORDMINI_BEAT_DETECTOR` | `madmom` (mặc định), `librosa`, `beat-transformer` |
+| `LLM_API_KEY` | Key **OpenAI-compatible** cho gợi ý luyện tập |
+| `LLM_API_BASE_URL` | Ví dụ `https://aiapiv2.pekpik.com/v1` |
+| `LLM_PRACTICE_ADVICE_MODEL` | `gpt-3.5-turbo` (mặc định) |
+| `PRACTICE_ADVICE_PROVIDER` | `openai` (mặc định) hoặc `gemini` |
+| `GEMINI_API_KEY` | Chỉ khi `PRACTICE_ADVICE_PROVIDER=gemini` |
+
+Cloud `chordmini.me` trả lỗi **`Missing App Check token`** (Firebase App Check) — chỉ chạy được ChordMini **trên máy bạn** cổng `5001`.
+
+#### So sánh audio hai bản (compare-two-song)
+
+Cần cài Python dependencies:
+
+```bash
+cd compare-two-song
+pip install -r requirements.txt
+```
+
+Script mặc định: `../compare-two-song/compare_two_song.py` (hoặc `COMPARE_SCRIPT`).
