@@ -1,0 +1,19 @@
+# ChordMini backend — chạy: docker compose -f docker-compose.chordmini.yml up --build
+# Cần clone ChordMiniApp trước (script start-chordmini-docker.ps1 tự clone).
+
+services:
+  chordmini:
+    build:
+      context: ${CHORDMINI_HOME}/python_backend
+      dockerfile: Dockerfile
+    image: chordmini-backend:latest
+    container_name: chordmini-local
+    ports:
+      - "5001:8080"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/model-info"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s

@@ -168,3 +168,11 @@ export async function getPublicProfile(userId) {
   if (!u) return null;
   return u;
 }
+
+export async function areFriends(userId1, userId2) {
+  if (!userId1 || !userId2) return false;
+  if (userId1.toString() === userId2.toString()) return false;
+  const [userA, userB] = normalizedPair(userId1, userId2);
+  const row = await Friendship.findOne({ userA, userB }).select('_id').lean();
+  return !!row;
+}

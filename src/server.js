@@ -1,6 +1,6 @@
 // server.js
+import './loadEnv.js';
 import express from 'express';
-import dotenv from 'dotenv';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
@@ -14,7 +14,6 @@ import passport from 'passport';
 import './config/passport.js';
 import { registerPresence } from './realtime/presence.js';
 import { setIO } from './lib/ioRegistry.js';
-dotenv.config();
 const app = express();
 
 /** --------- CORS CONFIG --------- **/
@@ -86,6 +85,8 @@ import legatoRoutes from './routes/legato.routes.js';
 import chatRoutes from './routes/chat.routes.js';
 import referenceSongRoutes from './routes/referenceSong.routes.js';
 import compareRoutes from './routes/compare.routes.js';
+import hopamRoutes from './routes/hopam.routes.js';
+import chordPracticeRoutes from './routes/chordPractice.routes.js';
 import userSongRoutes from './routes/userSong.routes.js';
 import storeRoutes from './routes/store.routes.js';
 import forumRoutes from './routes/forum.routes.js';
@@ -98,6 +99,7 @@ import progressRoutes from './routes/progress.routes.js';
 import practiceRoutes from './routes/practice.routes.js';
 import challengeRoutes from './routes/challenge.routes.js';
 import dashboardRoutes from './routes/dashboard.routes.js';
+import messageRoutes from './routes/message.routes.js';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
@@ -120,6 +122,8 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/legato', legatoRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/compare', compareRoutes);
+app.use('/api/hopam', hopamRoutes);
+app.use('/api/chord-practice', chordPracticeRoutes);
 app.use('/api/user-songs', userSongRoutes);
 app.use('/api/stores', storeRoutes);
 app.use('/api/forum', forumRoutes);
@@ -132,6 +136,7 @@ app.use('/api/progress', progressRoutes);
 app.use('/api/practice-routines', practiceRoutes);
 app.use('/api/challenge-songs', challengeRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/messages', messageRoutes);
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
 /** --------- ERRORS --------- **/
