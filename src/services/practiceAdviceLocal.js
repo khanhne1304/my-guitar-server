@@ -7,6 +7,7 @@ import {
   buildAdvancedAnalysis,
   computeSkillLevel,
 } from './practiceAdviceAnalysis.js';
+import { buildSongAssessmentFromValidation } from './songValidation.service.js';
 
 function round(n) {
   const x = Number(n);
@@ -35,6 +36,9 @@ export function buildLocalPracticeAdvice(ctx) {
   const title = song.title || 'bài này';
   const bpmDev = round(tempo.deviationPercent);
   const level = computeSkillLevel(acc, bpmDev);
+  const songVal = ctx.songValidation || {};
+  const isCorrectSong = Boolean(songVal.isCorrectSong);
+  const songCategory = songVal.category || 'incorrect';
 
   const strengths = [];
   const mainProblems = [];
@@ -53,15 +57,36 @@ export function buildLocalPracticeAdvice(ctx) {
   if (advanced.bpmAccuracy?.assessment && bpmDev != null && bpmDev <= 5) {
     strengths.push(advanced.bpmAccuracy.assessment);
   }
-  if (acc != null && acc >= 85) {
-    strengths.push(`Bạn đã chơi đúng phần lớn progression của «${title}».`);
+  if (isCorrectSong) {
+    strengths.push(`Bạn đang bám sát cấu trúc bài «${title}».`);
+  } else if (songCategory === 'mostly_correct') {
+    strengths.push(`Bạn đã bám sát phần lớn cấu trúc «${title}», còn vài đoạn cần chỉnh.`);
+  }
+
+  if (acc != null && acc >= 85 && isCorrectSong) {
+    strengths.push(`Bạn chơi đúng phần lớn hợp âm trong progression.`);
   }
 
   if (strengths.length === 0) {
     strengths.push('Bạn đã hoàn thành buổi luyện và ghi âm để phân tích — đó là bước rất quan trọng để tiến bộ.');
   }
 
-  if (acc != null && acc < 85) {
+  if (!isCorrectSong && (songCategory === 'incorrect' || songCategory === 'partially_correct')) {
+    prioritySkill = 'chord_memory';
+    mainProblems.push({
+      problem:
+        songCategory === 'incorrect'
+          ? 'Bản chơi hiện tại khác đáng kể so với bài hát tham chiếu.'
+          : 'Bạn mới tái hiện được một phần progression của bài gốc.',
+      cause:
+        'Thường do chọn sai bài, chưa nhớ progression, hoặc chơi nhầm đoạn/điệp khúc khác.',
+      impact: 'Bài nghe không giống bản gốc dù kỹ thuật tay có thể ổn ở vài đoạn.',
+      solution:
+        'Mở lại hợp âm gốc, luyện từng đoạn 4–8 ô nhịp và đối chiếu thứ tự hợp âm trước khi chơi trọn bài.',
+    });
+  }
+
+  if (acc != null && acc < 85 && isCorrectSong) {
     prioritySkill = 'chord_memory';
     mainProblems.push({
       problem: 'Một số hợp âm hoặc thứ tự chưa khớp với bài gốc.',
@@ -187,11 +212,17 @@ export function buildLocalPracticeAdvice(ctx) {
         ? 'trung cấp'
         : 'cơ bản';
 
+  const songValNote = songVal.assessment
+    ? `${songVal.assessment} `
+    : '';
+
   const overview = sanitizeDisplayText(
-    `Buổi luyện «${title}»: trình độ ${levelLabel}. ` +
-      (advanced.songMastery?.assessment ||
-        advanced.chordMemory?.assessment ||
-        'Hãy tập trung vào các gợi ý bên dưới để buổi luyện tiếp theo hiệu quả hơn.'),
+    `Buổi luyện «${title}»: trình độ ${levelLabel}. ${songValNote}` +
+      (isCorrectSong
+        ? advanced.songMastery?.assessment ||
+          advanced.chordMemory?.assessment ||
+          'Hãy tập trung vào các gợi ý bên dưới để buổi luyện tiếp theo hiệu quả hơn.'
+        : 'Hãy đối chiếu lại progression với bài gốc trước khi tăng tốc độ hoặc thêm cảm xúc.'),
   );
 
   const nextGoal =
@@ -215,5 +246,6 @@ export function buildLocalPracticeAdvice(ctx) {
     practicePlan: practicePlan.slice(0, 4),
     nextGoal,
     encouragement,
+    songAssessment: buildSongAssessmentFromValidation(songVal),
   };
 }

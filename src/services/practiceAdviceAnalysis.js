@@ -137,9 +137,14 @@ export function buildAdvancedAnalysis(ctx = {}) {
   }
 
   const acc = ch.accuracyPercent;
+  const songVal = ctx.songValidation || {};
   if (acc != null) {
     let assessment;
-    if (acc >= 85) {
+    if (songVal.category === 'incorrect' || songVal.category === 'partially_correct') {
+      assessment =
+        songVal.assessment ||
+        'Progression hiện tại chưa khớp bài tham chiếu — cần đối chiếu lại thứ tự hợp âm gốc.';
+    } else if (acc >= 85 && songVal.isCorrectSong) {
       assessment = 'Bạn đã nhớ phần lớn các hợp âm của bài hát.';
     } else if (acc >= 60) {
       assessment = 'Bạn nhớ được nhiều hợp âm, nhưng vẫn còn vài chỗ chưa chắc tay.';
@@ -150,10 +155,16 @@ export function buildAdvancedAnalysis(ctx = {}) {
   }
 
   const coverage = coverageRatio(ch.matched, ch.referenceLen);
-  if (acc != null && coverage != null) {
+  const songCoverage = songVal.coveragePercent;
+  const effectiveCoverage =
+    songCoverage != null ? songCoverage / 100 : coverage;
+  if (acc != null && effectiveCoverage != null) {
     let assessment;
-    const masteryScore = (acc / 100) * coverage;
-    if (masteryScore >= 0.85) {
+    const masteryScore = (acc / 100) * effectiveCoverage;
+    if (songVal.category === 'incorrect') {
+      assessment =
+        'Bản chơi chưa khớp bài tham chiếu — hãy luyện lại progression từng đoạn.';
+    } else if (masteryScore >= 0.85 && songVal.isCorrectSong) {
       assessment = 'Bạn đã chơi được gần như trọn bài với độ chính xác tốt.';
     } else if (masteryScore >= 0.55) {
       assessment = 'Bạn đã nắm được phần lớn bài, còn vài đoạn cần củng cố thêm.';
@@ -162,7 +173,8 @@ export function buildAdvancedAnalysis(ctx = {}) {
     }
     analysis.songMastery = {
       available: true,
-      coveragePercent: Math.round(coverage * 100),
+      coveragePercent:
+        songCoverage != null ? songCoverage : Math.round((coverage || 0) * 100),
       assessment,
     };
   }
