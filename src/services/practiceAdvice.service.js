@@ -1,558 +1,643 @@
-/**
- * Gợi ý luyện tập — LLM (OpenAI-compatible / Gemini) + fallback từ số liệu phân tích.
- */
-import '../loadEnv.js';
-import { buildLocalPracticeAdvice } from './practiceAdviceLocal.js';
-import {
-  extractJsonBlock,
-  looksLikeRawJson,
-  sanitizeDisplayText,
-  sanitizeStringList,
-} from './practiceAdviceSanitize.js';
-
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
-
-const MAX_REF_CHORDS = 40;
-const MAX_PRED_CHORDS = 25;
-const MAX_TIMELINE = 12;
-
-const SYSTEM_PROMPT = `Bạn là giáo viên guitar chuyên phân tích biểu diễn thực tế cho người Việt.
-
-Dựa trên:
-- kết quả detect hợp âm ChordMini
-- BPM/tempo
-- confidence score
-- so sánh progression với HopAmChuan
-- metadata audio nếu có
-
-Hãy phân tích sâu đoạn guitar như một giáo viên thật:
-- chỉ ra lỗi kỹ thuật
-- giải thích nguyên nhân âm thanh
-- đánh giá timing, groove, lực tay, độ sạch hợp âm
-- đưa hướng luyện cụ thể
-
-Quy tắc:
-- Chỉ dùng tiếng Việt tự nhiên.
-- Không markdown.
-- Không thêm text ngoài JSON.
-- Không bịa dữ liệu không có.
-- Nhận xét phải gắn với biểu hiện âm thanh cụ thể.
-- Nếu dữ liệu không chắc, dùng các cụm:
-  “có xu hướng”, “dường như”, “khả năng cao”.
-
-Bắt buộc phân tích:
-1. Âm sắc & kỹ thuật:
-- độ sạch nốt
-- rè dây/buzz
-- lực tay
-- dynamic
-- sustain
-- độ đều khi quạt/fingerstyle
-- consistency
-
-2. Tempo & nhịp:
-- BPM ổn định hay không
-- rushing/dragging
-- groove
-- giữ nhịp khi chuyển hợp âm
-- timing drift
-- metronome accuracy
-
-3. Hợp âm & chuyển đoạn:
-- độ khớp với HopAmChuan
-- hợp âm sai/missing
-- chuyển sớm/muộn
-- dead-air khi đổi hợp âm
-- lệch tone/capo
-- độ rõ chord voicing
-
-4. Cảm giác biểu diễn:
-- tự tin/do dự
-- mechanical hay musical
-- continuity
-- expressive dynamics
-
-5. Hướng luyện:
-- bài tập cụ thể
-- tempo luyện
-- lỗi cần ưu tiên sửa
-
-Trả về đúng một JSON:
-
-{
-  "overview":"Tổng quan ngắn gọn nhưng chuyên sâu",
-  "toneAndTimbre":[
-    "Nhận xét"
-  ],
-  "tempoAndRhythm":[
-    "Nhận xét"
-  ],
-  "chordsAndTransitions":[
-    "Nhận xét"
-  ],
-  "performanceFeel":[
-    "Nhận xét"
-  ],
-  "strengths":[
-    "Điểm mạnh"
-  ],
-  "weaknesses":[
-    "Điểm yếu"
-  ],
-  "practiceSteps":[
-    "Bài luyện cụ thể"
-  ],
-  "priority":"tempo|chords|tone|both"
-}`;
-
-function takeList(arr, max) {
-  if (!Array.isArray(arr)) return [];
-  return arr.slice(0, max);
-}
-
-function getOpenAiApiKey() {
-  return String(process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '').trim();
-}
-
-function getOpenAiBaseUrl() {
-  const base = String(
-    process.env.LLM_API_BASE_URL ||
-      process.env.OPENAI_BASE_URL ||
-      process.env.OPENAI_API_BASE_URL ||
-      '',
-  ).trim();
-  return base.replace(/\/$/, '');
-}
-
-function getOpenAiModel() {
-  return (
-    process.env.LLM_PRACTICE_ADVICE_MODEL ||
-    process.env.OPENAI_PRACTICE_ADVICE_MODEL ||
-    'gemini-2.5-flash'
-  ).trim();
-}
-
-function getGeminiApiKey() {
-  return String(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || '').trim();
-}
-
-function getGeminiModel() {
-  return (
-    process.env.GEMINI_PRACTICE_ADVICE_MODEL ||
-    process.env.GEMINI_MODEL ||
-    'gemini-2.5-flash'
-  ).trim();
-}
-
-function resolveProvider() {
-  const forced = String(process.env.PRACTICE_ADVICE_PROVIDER || '').toLowerCase();
-  if (forced === 'gemini') return 'gemini';
-  if (forced === 'openai' || forced === 'openai-compatible') return 'openai';
-  if (getOpenAiApiKey() && getOpenAiBaseUrl()) return 'openai';
-  if (getGeminiApiKey()) return 'gemini';
-  return 'openai';
-}
-
-export function buildAnalysisContext(payload = {}) {
-  const ref = payload.referenceSong || {};
-  const cmp = payload.comparison || {};
-  const tempo = payload.tempoComparison || {};
-  const metrics = payload.chordRecognition?.metrics || {};
-
-  const refSeq = takeList(cmp.referenceSequence, MAX_REF_CHORDS);
-  const predAligned = takeList(cmp.predictedSequence, MAX_PRED_CHORDS);
-  const predRaw = takeList(cmp.predictedSequenceRaw, MAX_PRED_CHORDS);
-  const timeline = takeList(payload.chordRecognition?.predicted_chords, MAX_TIMELINE).map(
-    (s) => ({
-      time: s.time,
-      chord: s.predicted_chord,
-      confidence: s.confidence,
-    }),
-  );
-
-  return {
-    song: {
-      title: ref.title,
-      artist: ref.artist,
-      key: ref.key,
-      capo: ref.capo,
-      rhythm: ref.rhythm,
-      tempo: ref.tempo,
-    },
-    chordMatch: {
-      accuracyPercent: cmp.accuracyPercent,
-      matched: cmp.matched,
-      referenceLen: cmp.referenceLen,
-      compareNote: cmp.compareNote,
-      transposeSemitones: cmp.transposeSemitones,
-      hopamCapo: cmp.hopamCapo,
-      analyzedTranspose: cmp.analyzedTranspose,
-    },
-    sequences: {
-      referenceSample: refSeq.join(' → '),
-      detectedAlignedSample: predAligned.join(' → '),
-      detectedRawSample: predRaw.join(' → '),
-    },
-    tempo: {
-      referenceBpm: tempo.referenceBpm,
-      detectedBpm: tempo.detectedBpm,
-      deviationPercent: tempo.deviationPercent,
-      direction: tempo.direction,
-      rating: tempo.rating,
-    },
-    recognition: {
-      segmentCount: metrics.n_chord_segments,
-      meanConfidence: metrics.mean_chord_confidence,
-    },
-    timeline,
-  };
-}
-
-function normalizeAdviceObject(parsed) {
-  if (!parsed || typeof parsed !== 'object') return null;
-
-  const overview = sanitizeDisplayText(
-    parsed.overview || parsed.summary || parsed.tom_tat || parsed.tong_ket || '',
-  );
-
-  const toneAndTimbre = sanitizeStringList(
-    parsed.toneAndTimbre ?? parsed.am_sac ?? parsed.amSac ?? parsed.timbre,
-  );
-  const tempoAndRhythm = sanitizeStringList(
-    parsed.tempoAndRhythm ?? parsed.tempo ?? parsed.nhip ?? parsed.rhythm,
-  );
-  const chordsAndTransitions = sanitizeStringList(
-    parsed.chordsAndTransitions ??
-      parsed.hop_am ??
-      parsed.chords ??
-      parsed.improvements,
-  );
-
-  const strengths = sanitizeStringList(
-    parsed.strengths ?? parsed.diem_manh ?? parsed.diem_tot,
-  );
-  const practiceSteps = sanitizeStringList(
-    parsed.practiceSteps ?? parsed.buoc_luyen ?? parsed.ke_hoach ?? parsed.steps,
-  );
-
-  const improvements = sanitizeStringList(
-    parsed.improvements ?? parsed.can_cai_thien ?? parsed.ky_nang_thieu,
-  );
-
-  let priority = String(parsed.priority || parsed.uu_tien || 'both').toLowerCase();
-  if (!['tempo', 'chords', 'both'].includes(priority)) priority = 'both';
-
-  const hasContent =
-    overview ||
-    toneAndTimbre.length ||
-    tempoAndRhythm.length ||
-    chordsAndTransitions.length ||
-    practiceSteps.length;
-
-  if (!hasContent) return null;
-
-  return {
-    overview,
-    summary: overview,
-    toneAndTimbre,
-    tempoAndRhythm,
-    chordsAndTransitions,
-    strengths,
-    improvements: improvements.length ? improvements : chordsAndTransitions,
-    practiceSteps,
-    priority,
-  };
-}
-
-function parseAdviceJson(raw) {
-  const block = extractJsonBlock(raw);
-  try {
-    return normalizeAdviceObject(JSON.parse(block));
-  } catch {
-    /* thử sửa trailing comma */
-  }
-  try {
-    const fixed = block.replace(/,\s*([}\]])/g, '$1');
-    return normalizeAdviceObject(JSON.parse(fixed));
-  } catch {
-    return null;
-  }
-}
-
-/** Trích gợi ý từ văn bản tự do nếu model không trả JSON */
-function parseAdviceFromPlainText(raw) {
-  const text = String(raw || '').trim();
-  if (!text || text.length < 40) return null;
-  if (looksLikeRawJson(text)) {
-    const fromJson = parseAdviceJson(text);
-    if (fromJson) return fromJson;
-  }
-
-  const lines = text
-    .split(/\n+/)
-    .map((l) => sanitizeDisplayText(l.replace(/^[\s\-*•\d.)]+/, '')))
-    .filter((l) => l.length > 8 && !looksLikeRawJson(l));
-
-  if (lines.length < 2) return null;
-
-  return {
-    overview: lines[0],
-    summary: lines[0],
-    toneAndTimbre: lines.filter((l) => /âm|sắc|tiếng|rõ|dyn|pick|strum|buzz/i.test(l)),
-    tempoAndRhythm: lines.filter((l) => /tempo|bpm|nhịp|phách|nhanh|chậm|metronome/i.test(l)),
-    chordsAndTransitions: lines.filter((l) => /hợp âm|chuyển|progression|capo|tone/i.test(l)),
-    strengths: lines.filter((l) => /tốt|mạnh|ổn|khá/i.test(l)).slice(0, 3),
-    improvements: [],
-    practiceSteps: lines.filter((l) => /luyện|bước|metronome|tập/i.test(l)).slice(0, 4),
-    priority: 'both',
-  };
-}
-
-function mergeUniqueLists(...lists) {
-  const out = [];
-  const seen = new Set();
-  for (const list of lists) {
-    for (const item of list || []) {
-      const t = sanitizeDisplayText(item);
-      if (!t || seen.has(t) || looksLikeRawJson(t)) continue;
-      seen.add(t);
-      out.push(t);
-    }
-  }
-  return out;
-}
-
-function mergeAdvice(context, aiPart, meta) {
-  const local = buildLocalPracticeAdvice(context);
-
-  if (!aiPart) {
-    return {
-      available: true,
-      source: 'local',
-      provider: 'analysis',
-      model: 'rule-based',
-      ...local,
-    };
-  }
-
-  const overview = sanitizeDisplayText(aiPart.overview || aiPart.summary || local.overview);
-  const toneAndTimbre = mergeUniqueLists(
-    aiPart.toneAndTimbre,
-    local.toneAndTimbre,
-  ).slice(0, 5);
-  const tempoAndRhythm = mergeUniqueLists(
-    aiPart.tempoAndRhythm,
-    local.tempoAndRhythm,
-  ).slice(0, 5);
-  const chordsAndTransitions = mergeUniqueLists(
-    aiPart.chordsAndTransitions,
-    local.chordsAndTransitions,
-  ).slice(0, 5);
-  const strengths = mergeUniqueLists(aiPart.strengths, local.strengths).slice(0, 5);
-  const practiceSteps = mergeUniqueLists(
-    aiPart.practiceSteps,
-    local.practiceSteps,
-  ).slice(0, 5);
-  const improvements = mergeUniqueLists(
-    aiPart.improvements,
-    chordsAndTransitions.slice(0, 2),
-    local.improvements,
-  ).slice(0, 5);
-
-  return {
-    available: true,
-    source: meta.source || 'ai',
-    provider: meta.provider,
-    model: meta.model,
-    overview,
-    summary: overview,
-    toneAndTimbre,
-    tempoAndRhythm,
-    chordsAndTransitions,
-    strengths,
-    improvements,
-    practiceSteps,
-    priority: aiPart.priority || local.priority,
-    skillFocus: local.skillFocus,
-  };
-}
-
-function formatApiError(errMsg, status) {
-  const m = String(errMsg || '');
-  if (/openai_error|bad_response_status_code/i.test(m) && status === 429) {
-    return 'Dịch vụ LLM tạm quá tải (429) — vẫn có gợi ý từ phân tích số liệu bên dưới.';
-  }
-  if (/quota|exceeded|insufficient|无权访问/i.test(m) || status === 429) {
-    return 'API AI hết hạn mức — vẫn hiển thị gợi ý từ kết quả phân tích.';
-  }
-  if (/无权访问|not authorized|does not have access/i.test(m)) {
-    return `Model không được phép — đổi LLM_PRACTICE_ADVICE_MODEL (vd. gemini-2.5-flash).`;
-  }
-  if (/invalid.*key|authentication|401|403/i.test(m)) {
-    return 'API key không hợp lệ — vẫn hiển thị gợi ý từ phân tích số liệu.';
-  }
-  return `AI: ${m || `HTTP ${status}`} — vẫn có gợi ý từ phân tích bên dưới.`;
-}
-
-function buildUserPrompt(context) {
-  return (
-    'Phân tích kỹ năng guitar còn thiếu và đưa gợi ý luyện tập. Dữ liệu:\n' +
-    JSON.stringify(context, null, 2)
-  );
-}
-
-function parseLlmRaw(raw) {
-  if (!raw) return null;
-  return parseAdviceJson(raw) || parseAdviceFromPlainText(raw);
-}
-
-function extractGeminiText(data) {
-  const parts = data?.candidates?.[0]?.content?.parts || [];
-  return parts
-    .map((p) => p.text || '')
-    .join('')
-    .trim();
-}
-
-async function callOpenAiCompatible(context) {
-  const apiKey = getOpenAiApiKey();
-  const baseUrl = getOpenAiBaseUrl();
-  const model = getOpenAiModel();
-  const url = `${baseUrl}/chat/completions`;
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.5,
-      max_tokens: 1400,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: buildUserPrompt(context) },
-      ],
-    }),
-  });
-
-  const data = await res.json().catch(() => ({}));
-  return { res, data, model };
-}
-
-async function generateWithOpenAiCompatible(context) {
-  const apiKey = getOpenAiApiKey();
-  const baseUrl = getOpenAiBaseUrl();
-
-  if (!apiKey || !baseUrl) {
-    return mergeAdvice(context, null, { provider: 'analysis' });
-  }
-
-  try {
-    const { res, data, model } = await callOpenAiCompatible(context);
-
-    if (!res.ok) {
-      const errMsg = data?.error?.message || `HTTP ${res.status}`;
-      console.warn('[practiceAdvice/openai]', errMsg);
-      const merged = mergeAdvice(context, null, { provider: 'openai-compatible' });
-      merged.aiWarning = formatApiError(errMsg, res.status);
-      return merged;
-    }
-
-    const raw = data?.choices?.[0]?.message?.content?.trim() || '';
-    const parsed = parseLlmRaw(raw);
-    if (!parsed) {
-      console.warn('[practiceAdvice/openai] parse fail, raw:', raw.slice(0, 300));
-      const merged = mergeAdvice(context, null, { provider: 'openai-compatible' });
-      merged.aiWarning =
-        'AI không trả JSON chuẩn — hiển thị gợi ý từ kết quả phân tích hợp âm & nhịp.';
-      return merged;
-    }
-
-    return mergeAdvice(context, parsed, {
-      source: 'ai',
-      provider: 'openai-compatible',
-      model,
-    });
-  } catch (err) {
-    console.warn('[practiceAdvice/openai]', err?.message);
-    const merged = mergeAdvice(context, null, { provider: 'openai-compatible' });
-    merged.aiWarning = `Lỗi kết nối AI: ${err.message}`;
-    return merged;
-  }
-}
-
-async function generateWithGemini(context) {
-  const apiKey = getGeminiApiKey();
-  if (!apiKey) {
-    return mergeAdvice(context, null, { provider: 'analysis' });
-  }
-
-  const model = getGeminiModel();
-  const url = `${GEMINI_API_BASE}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        contents: [{ role: 'user', parts: [{ text: buildUserPrompt(context) }] }],
-        generationConfig: {
-          temperature: 0.5,
-          maxOutputTokens: 2048,
-          responseMimeType: 'application/json',
-        },
-      }),
-    });
-
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const errMsg = data?.error?.message || `Gemini HTTP ${res.status}`;
-      console.warn('[practiceAdvice/gemini]', errMsg);
-      const merged = mergeAdvice(context, null, { provider: 'gemini' });
-      merged.aiWarning = formatApiError(errMsg, res.status);
-      return merged;
-    }
-
-    const raw = extractGeminiText(data);
-    const parsed = parseLlmRaw(raw);
-    if (!parsed) {
-      const merged = mergeAdvice(context, null, { provider: 'gemini' });
-      merged.aiWarning = 'Gemini không trả JSON chuẩn — dùng gợi ý từ phân tích số liệu.';
-      return merged;
-    }
-
-    return mergeAdvice(context, parsed, { source: 'ai', provider: 'gemini', model });
-  } catch (err) {
-    const merged = mergeAdvice(context, null, { provider: 'gemini' });
-    merged.aiWarning = `Lỗi Gemini: ${err.message}`;
-    return merged;
-  }
-}
-
-/**
- * @param {object} payload — kết quả phân tích từ /chord-practice/analyze (data)
- */
-export async function generatePracticeAdvice(payload) {
-  const context = buildAnalysisContext(payload);
-  const provider = resolveProvider();
-
-  if (provider === 'gemini') {
-    return generateWithGemini(context);
-  }
-  return generateWithOpenAiCompatible(context);
-}
-
-export function getPracticeAdviceConfigStatus() {
-  const provider = resolveProvider();
-  return {
-    provider,
-    openaiConfigured: Boolean(getOpenAiApiKey() && getOpenAiBaseUrl()),
-    geminiConfigured: Boolean(getGeminiApiKey()),
-    model: provider === 'gemini' ? getGeminiModel() : getOpenAiModel(),
-    baseUrl: provider === 'openai' ? getOpenAiBaseUrl() : null,
-    localFallback: true,
-  };
-}
+/**
+ * Gợi ý luyện tập — LLM (OpenAI-compatible / Gemini) + fallback huấn luyện viên local.
+ */
+import '../loadEnv.js';
+import { buildLocalPracticeAdvice } from './practiceAdviceLocal.js';
+import {
+  buildAdvancedAnalysis,
+  computeSkillLevel,
+  normalizeLevel,
+} from './practiceAdviceAnalysis.js';
+import {
+  extractJsonBlock,
+  looksLikeRawJson,
+  sanitizeDisplayText,
+  sanitizeStringList,
+} from './practiceAdviceSanitize.js';
+
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+
+const MAX_REF_CHORDS = 40;
+const MAX_PRED_CHORDS = 25;
+const MAX_TIMELINE = 12;
+
+const SYSTEM_PROMPT = `Bạn là huấn luyện viên guitar cá nhân, dạy người Việt mới học đến trung cấp.
+
+Nhiệm vụ: đánh giá buổi luyện tập guitar như một giáo viên thực tế — không phải báo cáo kỹ thuật.
+
+Nguyên tắc bắt buộc:
+- Luôn giải thích bằng ngôn ngữ đơn giản, dễ hiểu.
+- KHÔNG nhắc trực tiếp số liệu kỹ thuật (%, BPM deviation, confidence score, matched/referenceLen...) trong phản hồi.
+- Chuyển mọi số liệu thành nhận xét thực tế, dễ cảm nhận (vd: "bạn nhớ phần lớn hợp âm" thay vì "accuracy 78%").
+- Luôn bắt đầu bằng điểm mạnh của người chơi.
+- Chỉ tập trung tối đa 3 lỗi quan trọng nhất.
+- Mỗi lỗi phải giải thích nguyên nhân có thể xảy ra.
+- Mỗi lỗi phải kèm cách luyện tập cụ thể.
+- Không làm người học cảm thấy bị chê trách — giọng điệu khích lệ, thân thiện.
+- Khuyến khích người học tiếp tục luyện tập.
+- Chỉ dùng tiếng Việt tự nhiên.
+- Không markdown.
+- Không thêm text ngoài JSON.
+- Không bịa dữ liệu không có trong context.
+- Nếu dữ liệu không chắc, dùng: "có xu hướng", "dường như", "khả năng cao".
+
+Khi có advancedAnalysis trong context, hãy tham khảo (nếu available: true):
+- Chuyển hợp âm (chordTransition)
+- Độ ổn định nhịp (rhythmStability)
+- Độ chính xác BPM (bpmAccuracy)
+- Độ tự tin nhận diện hợp âm (chordConfidence)
+- Khả năng nhớ hợp âm (chordMemory)
+- Mức độ thành thạo bài hát (songMastery)
+
+Trường level trong JSON phải khớp với skillLevel trong context (Beginner | Intermediate | Advanced).
+
+Trả về đúng một JSON:
+
+{
+  "level": "Beginner | Intermediate | Advanced",
+  "overview": "Tổng quan ngắn gọn, bắt đầu bằng điểm mạnh",
+  "strengths": ["Điểm mạnh 1", "Điểm mạnh 2"],
+  "mainProblems": [
+    {
+      "problem": "Mô tả lỗi bằng ngôn ngữ dễ hiểu",
+      "cause": "Nguyên nhân có thể xảy ra",
+      "impact": "Ảnh hưởng đến cách nghe bài",
+      "solution": "Cách luyện tập cụ thể"
+    }
+  ],
+  "prioritySkill": "chord_transitions | chord_memory | rhythm | tone | dynamics",
+  "practicePlan": [
+    {
+      "title": "Tên bài tập",
+      "reason": "Vì sao cần luyện",
+      "exercise": "Hướng dẫn cụ thể",
+      "durationMinutes": 10
+    }
+  ],
+  "nextGoal": "Mục tiêu cho buổi luyện tiếp theo",
+  "encouragement": "Lời động viên ngắn gọn"
+}`;
+
+function takeList(arr, max) {
+  if (!Array.isArray(arr)) return [];
+  return arr.slice(0, max);
+}
+
+function getOpenAiApiKey() {
+  return String(process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '').trim();
+}
+
+function getOpenAiBaseUrl() {
+  const base = String(
+    process.env.LLM_API_BASE_URL ||
+      process.env.OPENAI_BASE_URL ||
+      process.env.OPENAI_API_BASE_URL ||
+      '',
+  ).trim();
+  return base.replace(/\/$/, '');
+}
+
+function getOpenAiModel() {
+  return (
+    process.env.LLM_PRACTICE_ADVICE_MODEL ||
+    process.env.OPENAI_PRACTICE_ADVICE_MODEL ||
+    'gemini-2.5-flash'
+  ).trim();
+}
+
+function getGeminiApiKey() {
+  return String(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || '').trim();
+}
+
+function getGeminiModel() {
+  return (
+    process.env.GEMINI_PRACTICE_ADVICE_MODEL ||
+    process.env.GEMINI_MODEL ||
+    'gemini-2.5-flash'
+  ).trim();
+}
+
+function resolveProvider() {
+  const forced = String(process.env.PRACTICE_ADVICE_PROVIDER || '').toLowerCase();
+  if (forced === 'gemini') return 'gemini';
+  if (forced === 'openai' || forced === 'openai-compatible') return 'openai';
+  if (getOpenAiApiKey() && getOpenAiBaseUrl()) return 'openai';
+  if (getGeminiApiKey()) return 'gemini';
+  return 'openai';
+}
+
+export function buildAnalysisContext(payload = {}) {
+  const ref = payload.referenceSong || {};
+  const cmp = payload.comparison || {};
+  const tempo = payload.tempoComparison || {};
+  const metrics = payload.chordRecognition?.metrics || {};
+
+  const refSeq = takeList(cmp.referenceSequence, MAX_REF_CHORDS);
+  const predAligned = takeList(cmp.predictedSequence, MAX_PRED_CHORDS);
+  const predRaw = takeList(cmp.predictedSequenceRaw, MAX_PRED_CHORDS);
+  const timeline = takeList(payload.chordRecognition?.predicted_chords, MAX_TIMELINE).map(
+    (s) => ({
+      time: s.time,
+      chord: s.predicted_chord,
+      confidence: s.confidence,
+    }),
+  );
+
+  const accuracyPercent = cmp.accuracyPercent;
+  const bpmDeviation = tempo.deviationPercent;
+  const skillLevel = computeSkillLevel(accuracyPercent, bpmDeviation);
+
+  const baseContext = {
+    song: {
+      title: ref.title,
+      artist: ref.artist,
+      key: ref.key,
+      capo: ref.capo,
+      rhythm: ref.rhythm,
+      tempo: ref.tempo,
+    },
+    skillLevel,
+    chordMatch: {
+      accuracyPercent,
+      matched: cmp.matched,
+      referenceLen: cmp.referenceLen,
+      compareNote: cmp.compareNote,
+      transposeSemitones: cmp.transposeSemitones,
+      hopamCapo: cmp.hopamCapo,
+      analyzedTranspose: cmp.analyzedTranspose,
+    },
+    sequences: {
+      referenceSample: refSeq.join(' → '),
+      detectedAlignedSample: predAligned.join(' → '),
+      detectedRawSample: predRaw.join(' → '),
+    },
+    tempo: {
+      referenceBpm: tempo.referenceBpm,
+      detectedBpm: tempo.detectedBpm,
+      deviationPercent: tempo.deviationPercent,
+      direction: tempo.direction,
+      rating: tempo.rating,
+    },
+    recognition: {
+      segmentCount: metrics.n_chord_segments,
+      meanConfidence: metrics.mean_chord_confidence,
+    },
+    timeline,
+  };
+
+  baseContext.advancedAnalysis = buildAdvancedAnalysis(baseContext);
+
+  return baseContext;
+}
+
+function sanitizeMainProblem(item) {
+  if (!item || typeof item !== 'object') return null;
+  const problem = sanitizeDisplayText(item.problem || item.loi || item.issue || '');
+  const cause = sanitizeDisplayText(item.cause || item.nguyen_nhan || '');
+  const impact = sanitizeDisplayText(item.impact || item.anh_huong || '');
+  const solution = sanitizeDisplayText(
+    item.solution || item.cach_sua || item.exercise || item.fix || '',
+  );
+  if (!problem) return null;
+  return { problem, cause, impact, solution };
+}
+
+function sanitizePracticePlanItem(item) {
+  if (!item || typeof item !== 'object') return null;
+  const title = sanitizeDisplayText(item.title || item.ten || '');
+  const reason = sanitizeDisplayText(item.reason || item.ly_do || '');
+  const exercise = sanitizeDisplayText(item.exercise || item.bai_tap || item.huong_dan || '');
+  const durationMinutes = Number(item.durationMinutes ?? item.duration ?? item.phut);
+  if (!title && !exercise) return null;
+  return {
+    title: title || 'Bài tập luyện tập',
+    reason,
+    exercise,
+    durationMinutes: Number.isFinite(durationMinutes) && durationMinutes > 0
+      ? Math.round(durationMinutes)
+      : 10,
+  };
+}
+
+function normalizeAdviceObject(parsed, context) {
+  if (!parsed || typeof parsed !== 'object') return null;
+
+  const fallbackAcc = context?.chordMatch?.accuracyPercent;
+  const fallbackDev = context?.tempo?.deviationPercent;
+
+  const level = normalizeLevel(parsed.level, fallbackAcc, fallbackDev);
+  const overview = sanitizeDisplayText(
+    parsed.overview || parsed.summary || parsed.tom_tat || parsed.tong_ket || '',
+  );
+  const strengths = sanitizeStringList(
+    parsed.strengths ?? parsed.diem_manh ?? parsed.diem_tot,
+  ).slice(0, 5);
+
+  const rawProblems =
+    parsed.mainProblems ??
+    parsed.problems ??
+    parsed.weaknesses ??
+    parsed.improvements ??
+    [];
+  let mainProblems = [];
+  if (Array.isArray(rawProblems)) {
+    mainProblems = rawProblems
+      .map((item) => {
+        if (typeof item === 'string') {
+          const text = sanitizeDisplayText(item);
+          return text ? { problem: text, cause: '', impact: '', solution: '' } : null;
+        }
+        return sanitizeMainProblem(item);
+      })
+      .filter(Boolean)
+      .slice(0, 3);
+  }
+
+  const prioritySkill = sanitizeDisplayText(
+    parsed.prioritySkill || parsed.priority || parsed.uu_tien || '',
+  );
+
+  const rawPlan =
+    parsed.practicePlan ?? parsed.practiceSteps ?? parsed.buoc_luyen ?? parsed.ke_hoach ?? [];
+  let practicePlan = [];
+  if (Array.isArray(rawPlan)) {
+    practicePlan = rawPlan
+      .map((item) => {
+        if (typeof item === 'string') {
+          const exercise = sanitizeDisplayText(item);
+          return exercise
+            ? { title: 'Bài tập', reason: '', exercise, durationMinutes: 10 }
+            : null;
+        }
+        return sanitizePracticePlanItem(item);
+      })
+      .filter(Boolean)
+      .slice(0, 5);
+  }
+
+  const nextGoal = sanitizeDisplayText(parsed.nextGoal || parsed.muc_tieu || parsed.goal || '');
+  const encouragement = sanitizeDisplayText(
+    parsed.encouragement || parsed.dong_vien || parsed.motivation || '',
+  );
+
+  const hasContent =
+    overview ||
+    strengths.length ||
+    mainProblems.length ||
+    practicePlan.length ||
+    nextGoal ||
+    encouragement;
+
+  if (!hasContent) return null;
+
+  return {
+    level,
+    overview,
+    strengths,
+    mainProblems,
+    prioritySkill,
+    practicePlan,
+    nextGoal,
+    encouragement,
+  };
+}
+
+function parseAdviceJson(raw, context) {
+  const block = extractJsonBlock(raw);
+  try {
+    return normalizeAdviceObject(JSON.parse(block), context);
+  } catch {
+    /* thử sửa trailing comma */
+  }
+  try {
+    const fixed = block.replace(/,\s*([}\]])/g, '$1');
+    return normalizeAdviceObject(JSON.parse(fixed), context);
+  } catch {
+    return null;
+  }
+}
+
+/** Trích gợi ý từ văn bản tự do nếu model không trả JSON */
+function parseAdviceFromPlainText(raw, context) {
+  const text = String(raw || '').trim();
+  if (!text || text.length < 40) return null;
+  if (looksLikeRawJson(text)) {
+    const fromJson = parseAdviceJson(text, context);
+    if (fromJson) return fromJson;
+  }
+
+  const lines = text
+    .split(/\n+/)
+    .map((l) => sanitizeDisplayText(l.replace(/^[\s\-*•\d.)]+/, '')))
+    .filter((l) => l.length > 8 && !looksLikeRawJson(l));
+
+  if (lines.length < 2) return null;
+
+  const strengths = lines.filter((l) => /tốt|mạnh|ổn|khá|giỏi|tự tin/i.test(l)).slice(0, 3);
+  const problemLines = lines.filter((l) => /cần|lỗi|chưa|sai|khó|yếu/i.test(l)).slice(0, 3);
+  const practiceLines = lines.filter((l) => /luyện|bước|metronome|tập|bài tập/i.test(l)).slice(0, 4);
+
+  return {
+    level: computeSkillLevel(
+      context?.chordMatch?.accuracyPercent,
+      context?.tempo?.deviationPercent,
+    ),
+    overview: lines[0],
+    strengths,
+    mainProblems: problemLines.map((p) => ({
+      problem: p,
+      cause: '',
+      impact: '',
+      solution: '',
+    })),
+    prioritySkill: '',
+    practicePlan: practiceLines.map((ex) => ({
+      title: 'Bài tập',
+      reason: '',
+      exercise: ex,
+      durationMinutes: 10,
+    })),
+    nextGoal: '',
+    encouragement: lines[lines.length - 1] || '',
+  };
+}
+
+function mergeMainProblems(aiList, localList) {
+  const out = [];
+  const seen = new Set();
+
+  for (const item of [...(aiList || []), ...(localList || [])]) {
+    const key = item?.problem?.slice(0, 60);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      problem: item.problem,
+      cause: item.cause || '',
+      impact: item.impact || '',
+      solution: item.solution || '',
+    });
+    if (out.length >= 3) break;
+  }
+  return out;
+}
+
+function mergePracticePlan(aiList, localList) {
+  const out = [];
+  const seen = new Set();
+
+  for (const item of [...(aiList || []), ...(localList || [])]) {
+    const key = `${item?.title}|${item?.exercise}`.slice(0, 80);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+    if (out.length >= 5) break;
+  }
+  return out;
+}
+
+function mergeUniqueLists(...lists) {
+  const out = [];
+  const seen = new Set();
+  for (const list of lists) {
+    for (const item of list || []) {
+      const t = sanitizeDisplayText(item);
+      if (!t || seen.has(t) || looksLikeRawJson(t)) continue;
+      seen.add(t);
+      out.push(t);
+    }
+  }
+  return out;
+}
+
+function mergeAdvice(context, aiPart, meta) {
+  const local = buildLocalPracticeAdvice(context);
+
+  if (!aiPart) {
+    return {
+      available: true,
+      source: 'local',
+      provider: 'analysis',
+      model: 'rule-based',
+      ...local,
+    };
+  }
+
+  const overview = sanitizeDisplayText(aiPart.overview || local.overview);
+  const strengths = mergeUniqueLists(aiPart.strengths, local.strengths).slice(0, 5);
+  const mainProblems = mergeMainProblems(aiPart.mainProblems, local.mainProblems);
+  const practicePlan = mergePracticePlan(aiPart.practicePlan, local.practicePlan);
+  const level = normalizeLevel(
+    aiPart.level,
+    context?.chordMatch?.accuracyPercent,
+    context?.tempo?.deviationPercent,
+  );
+
+  return {
+    available: true,
+    source: meta.source || 'ai',
+    provider: meta.provider,
+    model: meta.model,
+    level,
+    overview,
+    strengths,
+    mainProblems,
+    prioritySkill: aiPart.prioritySkill || local.prioritySkill,
+    practicePlan,
+    nextGoal: sanitizeDisplayText(aiPart.nextGoal || local.nextGoal),
+    encouragement: sanitizeDisplayText(aiPart.encouragement || local.encouragement),
+  };
+}
+
+function formatApiError(errMsg, status) {
+  const m = String(errMsg || '');
+  if (/openai_error|bad_response_status_code/i.test(m) && status === 429) {
+    return 'Dịch vụ AI tạm quá tải — vẫn có đánh giá từ buổi luyện của bạn bên dưới.';
+  }
+  if (/quota|exceeded|insufficient|无权访问/i.test(m) || status === 429) {
+    return 'API AI hết hạn mức — vẫn hiển thị đánh giá từ buổi luyện.';
+  }
+  if (/无权访问|not authorized|does not have access/i.test(m)) {
+    return 'Model không được phép — đổi GEMINI_PRACTICE_ADVICE_MODEL (vd. gemini-2.5-flash).';
+  }
+  if (/invalid.*key|authentication|401|403/i.test(m)) {
+    return 'API key không hợp lệ — vẫn hiển thị đánh giá từ buổi luyện.';
+  }
+  return `AI: ${m || `HTTP ${status}`} — vẫn có đánh giá từ buổi luyện bên dưới.`;
+}
+
+function buildUserPrompt(context) {
+  return `Hãy đánh giá buổi luyện tập guitar này như một giáo viên guitar thực tế.
+
+Yêu cầu:
+- Xác định trình độ hiện tại (level phải khớp skillLevel trong dữ liệu).
+- Nêu tối đa 3 lỗi quan trọng nhất.
+- Giải thích lỗi bằng ngôn ngữ dễ hiểu.
+- Không chỉ nói số liệu — chuyển số liệu thành nhận xét thực tế.
+- Đưa bài tập cụ thể để sửa lỗi.
+- Đề xuất mục tiêu cho lần luyện tập tiếp theo.
+- Luôn bắt đầu bằng điểm mạnh.
+- Giọng điệu khích lệ, không chê trách.
+
+Dữ liệu buổi luyện:
+${JSON.stringify(context, null, 2)}`;
+}
+
+function parseLlmRaw(raw, context) {
+  if (!raw) return null;
+  return parseAdviceJson(raw, context) || parseAdviceFromPlainText(raw, context);
+}
+
+function extractGeminiText(data) {
+  const parts = data?.candidates?.[0]?.content?.parts || [];
+  return parts
+    .map((p) => p.text || '')
+    .join('')
+    .trim();
+}
+
+async function callOpenAiCompatible(context) {
+  const apiKey = getOpenAiApiKey();
+  const baseUrl = getOpenAiBaseUrl();
+  const model = getOpenAiModel();
+  const url = `${baseUrl}/chat/completions`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.5,
+      max_tokens: 1800,
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: buildUserPrompt(context) },
+      ],
+    }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  return { res, data, model };
+}
+
+async function generateWithOpenAiCompatible(context) {
+  const apiKey = getOpenAiApiKey();
+  const baseUrl = getOpenAiBaseUrl();
+
+  if (!apiKey || !baseUrl) {
+    return mergeAdvice(context, null, { provider: 'analysis' });
+  }
+
+  try {
+    const { res, data, model } = await callOpenAiCompatible(context);
+
+    if (!res.ok) {
+      const errMsg = data?.error?.message || `HTTP ${res.status}`;
+      console.warn('[practiceAdvice/openai]', errMsg);
+      const merged = mergeAdvice(context, null, { provider: 'openai-compatible' });
+      merged.aiWarning = formatApiError(errMsg, res.status);
+      return merged;
+    }
+
+    const raw = data?.choices?.[0]?.message?.content?.trim() || '';
+    const parsed = parseLlmRaw(raw, context);
+    if (!parsed) {
+      console.warn('[practiceAdvice/openai] parse fail, raw:', raw.slice(0, 300));
+      const merged = mergeAdvice(context, null, { provider: 'openai-compatible' });
+      merged.aiWarning =
+        'AI không trả JSON chuẩn — hiển thị đánh giá từ buổi luyện của bạn.';
+      return merged;
+    }
+
+    return mergeAdvice(context, parsed, {
+      source: 'ai',
+      provider: 'openai-compatible',
+      model,
+    });
+  } catch (err) {
+    console.warn('[practiceAdvice/openai]', err?.message);
+    const merged = mergeAdvice(context, null, { provider: 'openai-compatible' });
+    merged.aiWarning = `Lỗi kết nối AI: ${err.message}`;
+    return merged;
+  }
+}
+
+async function generateWithGemini(context) {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey) {
+    return mergeAdvice(context, null, { provider: 'analysis' });
+  }
+
+  const model = getGeminiModel();
+  const url = `${GEMINI_API_BASE}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        contents: [{ role: 'user', parts: [{ text: buildUserPrompt(context) }] }],
+        generationConfig: {
+          temperature: 0.5,
+          maxOutputTokens: 8192,
+          responseMimeType: 'application/json',
+          thinkingConfig: { thinkingBudget: 0 },
+        },
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const errMsg = data?.error?.message || `Gemini HTTP ${res.status}`;
+      console.warn('[practiceAdvice/gemini]', errMsg);
+      const merged = mergeAdvice(context, null, { provider: 'gemini' });
+      merged.aiWarning = formatApiError(errMsg, res.status);
+      return merged;
+    }
+
+    const raw = extractGeminiText(data);
+    const parsed = parseLlmRaw(raw, context);
+    if (!parsed) {
+      const merged = mergeAdvice(context, null, { provider: 'gemini' });
+      merged.aiWarning = 'Gemini không trả JSON chuẩn — dùng đánh giá từ buổi luyện.';
+      return merged;
+    }
+
+    return mergeAdvice(context, parsed, { source: 'ai', provider: 'gemini', model });
+  } catch (err) {
+    const merged = mergeAdvice(context, null, { provider: 'gemini' });
+    merged.aiWarning = `Lỗi Gemini: ${err.message}`;
+    return merged;
+  }
+}
+
+/**
+ * @param {object} payload — kết quả phân tích từ /chord-practice/analyze (data)
+ */
+export async function generatePracticeAdvice(payload) {
+  const context = buildAnalysisContext(payload);
+  const provider = resolveProvider();
+
+  if (provider === 'gemini') {
+    return generateWithGemini(context);
+  }
+  return generateWithOpenAiCompatible(context);
+}
+
+export function getPracticeAdviceConfigStatus() {
+  const provider = resolveProvider();
+  return {
+    provider,
+    openaiConfigured: Boolean(getOpenAiApiKey() && getOpenAiBaseUrl()),
+    geminiConfigured: Boolean(getGeminiApiKey()),
+    model: provider === 'gemini' ? getGeminiModel() : getOpenAiModel(),
+    baseUrl: provider === 'openai' ? getOpenAiBaseUrl() : null,
+    localFallback: true,
+  };
+}
+
+export { computeSkillLevel, buildAdvancedAnalysis };
+

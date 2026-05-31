@@ -71,7 +71,7 @@ function Ensure-ChordMiniModelRepos {
   $btCode = Join-Path $bt "code\DilatedTransformer.py"
 
   if (-not (Test-Path $btCode)) {
-    Write-Host "Thieu Beat-Transformer (submodule) — dang clone..." -ForegroundColor Yellow
+    Write-Host "Thieu Beat-Transformer  — dang clone..." -ForegroundColor Yellow
     if (Test-Path $bt) { Remove-Item $bt -Recurse -Force -ErrorAction SilentlyContinue }
     git clone --depth 1 https://github.com/ptnghia-j/beat-transformer-model.git $bt
     if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -79,7 +79,7 @@ function Ensure-ChordMiniModelRepos {
 
   $ccMarker = Join-Path $cc "chord_recognition.py"
   if (-not (Test-Path $ccMarker)) {
-    Write-Host "Thieu Chord-CNN-LSTM (submodule) — dang clone..." -ForegroundColor Yellow
+    Write-Host "Thieu Chord-CNN-LSTM — dang clone..." -ForegroundColor Yellow
     if (Test-Path $cc) { Remove-Item $cc -Recurse -Force -ErrorAction SilentlyContinue }
     git clone --depth 1 https://github.com/ptnghia-j/chord-cnn-lstm-model.git $cc
     if ($LASTEXITCODE -ne 0) { exit 1 }

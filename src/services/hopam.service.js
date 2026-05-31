@@ -1,6 +1,48 @@
+import dns from 'dns';
 import { parseHopamTempo } from '../utils/tempoCompare.js';
 
+dns.setDefaultResultOrder('ipv4first');
+
 const HOPAM_DOMAIN = 'https://hopamchuan.com';
+const HOPAM_FETCH_TIMEOUT_MS = 25_000;
+
+const HOPAM_HEADERS = {
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  Accept: 'application/json, text/html, */*',
+  'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.8',
+  Origin: HOPAM_DOMAIN,
+  Referer: `${HOPAM_DOMAIN}/`,
+};
+
+async function hopamFetch(url, options = {}) {
+  const { timeoutMs = HOPAM_FETCH_TIMEOUT_MS, retries = 2, ...fetchOptions } = options;
+  let lastErr;
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      const res = await fetch(url, {
+        ...fetchOptions,
+        headers: { ...HOPAM_HEADERS, ...fetchOptions.headers },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      return res;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries) {
+        await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+      }
+    }
+  }
+
+  const code = lastErr?.cause?.code || lastErr?.code;
+  if (code === 'UND_ERR_CONNECT_TIMEOUT' || /fetch failed/i.test(lastErr?.message || '')) {
+    throw new Error(
+      'Không kết nối được HopAmChuan (mạng hoặc trang tạm thời không phản hồi). Thử lại sau.',
+    );
+  }
+  throw lastErr;
+}
 
 function decodeHtmlEntities(text, { collapseWhitespace = false } = {}) {
   let out = String(text || '')
@@ -46,12 +88,9 @@ export async function searchHopamSongs(query) {
   if (keyword.length < 2) return [];
 
   const body = new URLSearchParams({ keyword });
-  const res = await fetch(`${HOPAM_DOMAIN}/ajax/ajax_song/search_autocomplete`, {
+  const res = await hopamFetch(`${HOPAM_DOMAIN}/ajax/ajax_song/search_autocomplete`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': 'MyGuitarApp/1.0',
-    },
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body.toString(),
   });
 
@@ -228,9 +267,7 @@ function parseSongHtml(html, sourceUrl) {
 /** @param {string} urlOrId */
 export async function fetchHopamSong(urlOrId) {
   const fetchUrl = buildSongFetchUrl(urlOrId);
-  const res = await fetch(fetchUrl, {
-    headers: { 'User-Agent': 'MyGuitarApp/1.0' },
-  });
+  const res = await hopamFetch(fetchUrl);
 
   if (!res.ok) {
     throw new Error(`Không tải được bài hát (${res.status})`);

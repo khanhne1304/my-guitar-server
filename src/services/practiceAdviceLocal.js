@@ -1,189 +1,219 @@
 /**
- * Gợi ý luyện tập dựa trên số liệu phân tích (không cần LLM).
+ * Gợi ý luyện tập dạng huấn luyện viên — fallback khi LLM lỗi (không cần API).
  */
 
 import { sanitizeDisplayText } from './practiceAdviceSanitize.js';
+import {
+  buildAdvancedAnalysis,
+  computeSkillLevel,
+} from './practiceAdviceAnalysis.js';
 
 function round(n) {
   const x = Number(n);
   return Number.isFinite(x) ? Math.round(x) : null;
 }
 
+function tempoDirectionLabel(direction) {
+  if (direction === 'faster') return 'nhanh hơn';
+  if (direction === 'slower') return 'chậm hơn';
+  return 'gần đúng với';
+}
+
+/**
+ * @param {object} ctx — context từ buildAnalysisContext
+ */
 export function buildLocalPracticeAdvice(ctx) {
   const song = ctx.song || {};
   const ch = ctx.chordMatch || {};
   const tempo = ctx.tempo || {};
   const rec = ctx.recognition || {};
-  const timeline = ctx.timeline || [];
+  const advanced = ctx.advancedAnalysis || buildAdvancedAnalysis(ctx);
 
   const acc = ch.accuracyPercent;
   const matched = ch.matched;
   const refLen = ch.referenceLen;
   const title = song.title || 'bài này';
-  const key = song.key ? `tone ${song.key}` : 'tone bài gốc';
-  const capo = song.capo > 0 ? `capo ${song.capo}` : null;
-  const rhythm = song.rhythm ? String(song.rhythm) : null;
+  const bpmDev = round(tempo.deviationPercent);
+  const level = computeSkillLevel(acc, bpmDev);
 
   const strengths = [];
-  const improvements = [];
-  const practiceSteps = [];
-  const toneAndTimbre = [];
-  const tempoAndRhythm = [];
-  const chordsAndTransitions = [];
-  let priority = 'both';
+  const mainProblems = [];
+  const practicePlan = [];
+  let prioritySkill = 'chord_transitions';
 
-  const confPct =
-    rec.meanConfidence != null ? Math.round(rec.meanConfidence * 100) : null;
-
-  if (confPct != null && confPct >= 85) {
-    toneAndTimbre.push(
-      `Âm sắc & độ rõ: hệ thống nhận diện ổn định (~${confPct}% độ tin cậy) — tiếng đàn tương đối rõ, ít “mơ hồ” giữa các hợp âm.`,
-    );
-    strengths.push('Âm thanh đủ rõ để phân tích hợp âm chính xác.');
-  } else if (confPct != null && confPct < 70) {
-    toneAndTimbre.push(
-      'Âm sắc: độ tin cậy nhận diện thấp — thử ghi gần micro hơn, strum rõ từng đổi hợp âm, kiểm tra chỉnh dây và tránh tiếng buzz/rè.',
-    );
-    improvements.push('Kỹ năng âm sắc: luyện đánh đều lực tay, tách bass/treble rõ khi strum.');
-  } else {
-    toneAndTimbre.push(
-      'Âm sắc: cố gắng giữ dynamics đều — không gẩy quá mạnh ở hợp âm mạnh rồi yếu ở hợp âm nhẹ; dùng pick hoặc ngón ổn định.',
-    );
+  if (advanced.chordMemory?.assessment && acc != null && acc >= 60) {
+    strengths.push(advanced.chordMemory.assessment);
   }
-
-  if (timeline.length >= 2) {
-    const durations = timeline.map((t) => t.duration || 2);
-    const avgDur = durations.reduce((a, b) => a + b, 0) / durations.length;
-    if (avgDur < 1.5) {
-      toneAndTimbre.push(
-        'Các đoạn hợp âm chuyển rất nhanh — có thể âm bị “cắt cụt”. Luyện giữ rung dây đủ lâu (2–3 nhịp/hợp âm) trước khi đổi.',
-      );
-    }
+  if (advanced.chordConfidence?.assessment && rec.meanConfidence >= 0.75) {
+    strengths.push(advanced.chordConfidence.assessment);
   }
-
+  if (advanced.rhythmStability?.rating === 'good') {
+    strengths.push('Bạn giữ nhịp khá ổn định suốt buổi luyện.');
+  }
+  if (advanced.bpmAccuracy?.assessment && bpmDev != null && bpmDev <= 5) {
+    strengths.push(advanced.bpmAccuracy.assessment);
+  }
   if (acc != null && acc >= 85) {
-    strengths.push(
-      `Hợp âm: khớp ~${acc}% (${matched}/${refLen}) với bài chuẩn — progression nắm khá tốt.`,
-    );
-    chordsAndTransitions.push(
-      `Ưu tiên giữ độ chính xác khi tăng tốc; hiện khớp ${matched}/${refLen} đoạn tham chiếu.`,
-    );
+    strengths.push(`Bạn đã chơi đúng phần lớn progression của «${title}».`);
+  }
+
+  if (strengths.length === 0) {
+    strengths.push('Bạn đã hoàn thành buổi luyện và ghi âm để phân tích — đó là bước rất quan trọng để tiến bộ.');
   }
 
   if (acc != null && acc < 85) {
-    priority = acc < 60 ? 'chords' : 'both';
-    chordsAndTransitions.push(
-      `Hợp âm & chuyển đoạn: độ khớp ${acc}% — cần luyện đúng thứ tự và thời điểm đổi hợp âm trong «${title}».`,
-    );
-    chordsAndTransitions.push(
-      'Kỹ năng thiếu: chuyển hợp âm muộn/sớm, hoặc bỏ sót hợp âm trong progression.',
-    );
-    practiceSteps.push(
-      'Chia 4–8 ô nhịp mỗi đoạn; luyện vòng hợp âm chuẩn ở 60–70% tốc độ, sau đó ghép lời.',
-    );
+    prioritySkill = 'chord_memory';
+    mainProblems.push({
+      problem: 'Một số hợp âm hoặc thứ tự chưa khớp với bài gốc.',
+      cause:
+        'Thường do chưa nhớ hết progression, hoặc tay chưa quen chuyển nhanh giữa các hình hợp âm.',
+      impact: 'Bài hát nghe chưa giống bản gốc và dễ bị “đứt” ở các đoạn chuyển.',
+      solution:
+        'Chia bài thành 4–8 ô nhịp, luyện vòng hợp âm chậm (60–70% tốc độ) rồi ghép dần.',
+    });
   }
 
-  if (ch.compareNote) {
-    chordsAndTransitions.push(
-      `${ch.compareNote} — có thể đúng “hình” hợp âm nhưng sai tone so với HopAmChuan (${key}${capo ? `, ${capo}` : ''}).`,
-    );
-    toneAndTimbre.push(
-      'Âm sắc / tone: khi lệch giọng, người nghe cảm giác “không giống bản gốc” dù hợp âm gần đúng — chỉnh capo hoặc transpose cho khớp.',
-    );
-    practiceSteps.push(
-      'Dùng transpose/capo trên app khớp bài gốc; luyện một tone cố định suốt bài.',
-    );
+  if (
+    advanced.chordTransition?.mismatchCount > 0 &&
+    mainProblems.length < 3
+  ) {
+    prioritySkill = prioritySkill === 'chord_memory' ? 'chord_transitions' : prioritySkill;
+    mainProblems.push({
+      problem: 'Chuyển hợp âm chưa mượt ở một số đoạn.',
+      cause:
+        'Khi đổi hợp âm, ngón tay chưa sẵn sàng hoặc strum bị gián đoạn giữa hai hình hợp âm.',
+      impact: 'Bài nghe không liền mạch, có khoảng “chết” giữa các hợp âm.',
+      solution:
+        'Luyện riêng từng cặp hợp âm hay sai: đặt ngón sẵn trước 1 nhịp, strum chậm 4 lần rồi tăng dần.',
+    });
   }
 
-  const detBpm = round(tempo.detectedBpm);
   const refBpm = round(tempo.referenceBpm);
-
-  if (refBpm && detBpm) {
-    const dev = round(tempo.deviationPercent);
-    const dir =
-      tempo.direction === 'faster'
-        ? 'nhanh hơn'
-        : tempo.direction === 'slower'
-          ? 'chậm hơn'
-          : 'gần đúng';
-    tempoAndRhythm.push(
-      `Tempo: bạn chơi ~${detBpm} BPM, bài chuẩn ~${refBpm} BPM (${dir}, lệch ~${dev}%).`,
-    );
-    if (rhythm) {
-      tempoAndRhythm.push(`Nhịp/điệu bài gốc (HopAmChuan): ${rhythm}.`);
-    }
-    if (tempo.rating === 'good') {
-      strengths.push(`Nhịp ổn (lệch tempo ~${dev}%).`);
-      tempoAndRhythm.push('Duy trì cảm giác groove hiện tại khi luyện đoạn khó.');
-    } else if (tempo.rating === 'high' || tempo.rating === 'moderate') {
-      priority = priority === 'chords' ? 'both' : 'tempo';
-      tempoAndRhythm.push(
-        `Kỹ năng nhịp: luyện gõ chân/metronome theo ${refBpm} BPM trước khi thêm hợp âm phức tạp.`,
-      );
-      const targetSlow = Math.max(60, Math.round(refBpm * 0.85));
-      practiceSteps.push(
-        `Metronome ${targetSlow} BPM → tăng dần 5 BPM đến ${refBpm} BPM; một hợp âm mỗi phách.`,
-      );
-    }
-  } else if (detBpm) {
-    tempoAndRhythm.push(
-      `Tempo ghi nhận ~${detBpm} BPM; bài chưa có BPM chuẩn — tự đặt mục tiêu và luyện đếm phách đều.`,
-    );
-    if (rhythm) {
-      tempoAndRhythm.push(`Tham khảo điệu bài: ${rhythm}.`);
-    }
-  } else {
-    tempoAndRhythm.push(
-      'Chưa ước lượng được tempo từ audio — thu lại bản rõ hơn hoặc đặt BPM trên trang bài rồi phân tích lại.',
-    );
+  const detBpm = round(tempo.detectedBpm);
+  if (
+    refBpm &&
+    detBpm &&
+    tempo.rating &&
+    tempo.rating !== 'good' &&
+    mainProblems.length < 3
+  ) {
+    prioritySkill = 'rhythm';
+    const dir = tempoDirectionLabel(tempo.direction);
+    mainProblems.push({
+      problem: `Tốc độ chơi ${dir} bài gốc.`,
+      cause:
+        'Có thể do chưa quen đếm phách, hoặc mất nhịp khi tập trung vào hợp âm khó.',
+      impact: 'Cảm giác groove của bài bị lệch so với bản gốc.',
+      solution: `Bật metronome ${Math.max(60, Math.round(refBpm * 0.85))} BPM, đánh một hợp âm mỗi phách, tăng dần về ${refBpm} BPM.`,
+    });
   }
 
-  if (refLen && matched != null && matched < refLen * 0.6) {
-    chordsAndTransitions.push(
-      'Độ dài bản ghi: chưa cover hết progression bài chuẩn — luyện intro, điệp khúc và đoạn chuyển.',
-    );
+  if (
+    rec.meanConfidence != null &&
+    rec.meanConfidence < 0.7 &&
+    mainProblems.length < 3
+  ) {
+    mainProblems.push({
+      problem: 'Một số hợp âm nghe chưa rõ ràng.',
+      cause:
+        'Lực tay không đều, dây chưa chỉnh chuẩn, hoặc micro thu xa tiếng đàn.',
+      impact: 'Khó nghe rõ từng hợp âm, dễ mất tự tin khi chơi trước người khác.',
+      solution:
+        'Luyện strum đều ở volume vừa phải, kiểm tra chỉnh dây, thu lại gần micro hơn.',
+    });
   }
 
-  if (rec.segmentCount != null && rec.segmentCount < 10) {
-    chordsAndTransitions.push(
-      `Chỉ ${rec.segmentCount} đoạn hợp âm nhận diện — ghi âm dài hơn, strum rõ mỗi phách đổi hợp âm.`,
-    );
+  if (ch.compareNote && mainProblems.length < 3) {
+    mainProblems.push({
+      problem: 'Tone/capo có thể chưa khớp bài gốc.',
+      cause: ch.compareNote,
+      impact: 'Dù hợp âm gần đúng, bài vẫn nghe khác bản gốc.',
+      solution: 'Chỉnh capo hoặc transpose trên app cho khớp HopAmChuan rồi luyện một tone cố định.',
+    });
+    prioritySkill = 'tone';
   }
 
-  improvements.push(...chordsAndTransitions.slice(0, 2));
-
-  if (practiceSteps.length === 0) {
-    practiceSteps.push(
-      '15 phút/ngày: 5 phút metronome, 5 phút âm sắc (lực tay đều), 5 phút lặp đoạn khó.',
-    );
+  if (refLen && matched != null && matched < refLen * 0.6 && mainProblems.length < 3) {
+    mainProblems.push({
+      problem: 'Bản ghi chưa cover hết bài.',
+      cause: 'Có thể dừng sớm hoặc chưa luyện đủ các đoạn intro/điệp khúc.',
+      impact: 'Khó đánh giá toàn bộ kỹ năng chơi bài.',
+      solution: 'Chia bài thành intro — điệp khúc — bridge; luyện từng phần rồi ghép lại.',
+    });
   }
 
-  if (improvements.length === 0) {
-    improvements.push('Tiếp tục củng cố nhịp và độ sạch âm khi chuyển hợp âm.');
+  const trimmedProblems = mainProblems.slice(0, 3);
+
+  if (trimmedProblems.length > 0) {
+    practicePlan.push({
+      title: 'Sửa lỗi ưu tiên nhất',
+      reason: trimmedProblems[0].problem,
+      exercise: trimmedProblems[0].solution,
+      durationMinutes: 10,
+    });
   }
+
+  if (acc != null && acc < 85) {
+    practicePlan.push({
+      title: 'Ghi nhớ progression',
+      reason: 'Cần nhớ thứ tự hợp âm để bài liền mạch hơn.',
+      exercise: `Lặp vòng hợp âm của «${title}» ở 60 BPM, không hát, chỉ strum rõ từng đổi.`,
+      durationMinutes: 10,
+    });
+  }
+
+  if (refBpm && tempo.rating !== 'good') {
+    practicePlan.push({
+      title: 'Ổn định nhịp',
+      reason: 'Giữ tempo đều giúp bài nghe tự nhiên hơn.',
+      exercise: `Metronome ${Math.max(60, Math.round(refBpm * 0.85))} BPM — 1 hợp âm/phách, tăng 5 BPM mỗi lần thành công.`,
+      durationMinutes: 8,
+    });
+  }
+
+  if (practicePlan.length === 0) {
+    practicePlan.push({
+      title: 'Duy trì phong độ',
+      reason: 'Buổi luyện tốt — tiếp tục củng cố để chơi mượt hơn nữa.',
+      exercise: '15 phút: 5 phút metronome, 5 phút luyện đoạn khó, 5 phút chơi trọn bài.',
+      durationMinutes: 15,
+    });
+  }
+
+  const levelLabel =
+    level === 'Advanced'
+      ? 'nâng cao'
+      : level === 'Intermediate'
+        ? 'trung cấp'
+        : 'cơ bản';
 
   const overview = sanitizeDisplayText(
-    `Bản «${title}»: hợp âm khớp ${acc != null ? `${acc}%` : '—'}` +
-      (detBpm ? `, tempo ~${detBpm} BPM` : '') +
-      (ch.compareNote ? `. ${ch.compareNote}` : '') +
-      '. Tập trung cải thiện âm sắc, nhịp và chuyển hợp âm theo từng mục bên dưới.',
+    `Buổi luyện «${title}»: trình độ ${levelLabel}. ` +
+      (advanced.songMastery?.assessment ||
+        advanced.chordMemory?.assessment ||
+        'Hãy tập trung vào các gợi ý bên dưới để buổi luyện tiếp theo hiệu quả hơn.'),
   );
 
+  const nextGoal =
+    level === 'Advanced'
+      ? 'Giữ độ chính xác khi tăng tốc hoặc thêm cảm xúc (dynamics) vào bài.'
+      : level === 'Intermediate'
+        ? 'Chơi trọn bài mượt mà hơn, giảm thời gian chết giữa các hợp âm.'
+        : 'Nhớ đúng thứ tự hợp âm và giữ nhịp đều ở tốc độ chậm.';
+
+  const encouragement =
+    level === 'Advanced'
+      ? 'Bạn đang chơi rất tốt — tiếp tục luyện đều để giữ phong độ và thêm cảm xúc vào bài!'
+      : 'Mỗi buổi luyện đều giúp bạn tiến bộ — đừng nản, hãy thử lại với bài tập nhỏ bên dưới!';
+
   return {
+    level,
     overview,
-    summary: overview,
     strengths: strengths.slice(0, 4),
-    improvements: improvements.slice(0, 5),
-    practiceSteps: practiceSteps.slice(0, 5),
-    toneAndTimbre: toneAndTimbre.slice(0, 4),
-    tempoAndRhythm: tempoAndRhythm.slice(0, 4),
-    chordsAndTransitions: chordsAndTransitions.slice(0, 5),
-    priority,
-    skillFocus: {
-      timbre: true,
-      tempo: Boolean(tempo.detectedBpm),
-      chords: acc != null && acc < 95,
-      tone: Boolean(ch.compareNote),
-    },
+    mainProblems: trimmedProblems,
+    prioritySkill,
+    practicePlan: practicePlan.slice(0, 4),
+    nextGoal,
+    encouragement,
   };
 }
