@@ -89,7 +89,7 @@ function parseBudget(text) {
 
 export async function chatRecommend(req, res, next) {
 	try {
-		const { message, budgetMin, budgetMax } = req.body || {};
+		const { message, budgetMin, budgetMax, sessionId } = req.body || {};
 		if (!message || typeof message !== 'string') {
 			return res.status(400).json({ message: 'Thiếu trường message (string)' });
 		}
@@ -102,6 +102,7 @@ export async function chatRecommend(req, res, next) {
 			message,
 			budgetMin: Number.isFinite(budgetMin) ? budgetMin : autoBudget.budgetMin,
 			budgetMax: Number.isFinite(budgetMax) ? budgetMax : autoBudget.budgetMax,
+			sessionId: typeof sessionId === 'string' ? sessionId : undefined,
 		});
 		res.json(result);
 	} catch (e) {

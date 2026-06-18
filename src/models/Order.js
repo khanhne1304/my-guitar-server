@@ -27,7 +27,7 @@ const orderSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ['cod', 'vnpay', 'momo'],
+      enum: ['cod'],
       default: 'cod',
     },
     status: {
@@ -42,6 +42,7 @@ const orderSchema = new mongoose.Schema(
       couponId: { type: mongoose.Schema.Types.ObjectId, ref: 'Coupon' },
     },
     subtotal: { type: Number }, // Tổng tiền trước khi giảm giá
+    shipFee: { type: Number, default: 0 },
     paidAt: Date,
     cancelReason: {
       type: String,

@@ -1,67 +1,69 @@
-import Product from '../models/Product.js';
-import { pipeline } from '@xenova/transformers';
-import { isCompanyQuery, answerCompanyQuestion } from '../data/companyInfo.js';
+// RAG service xây dựng theo kiến trúc LangChain (Retrieval-Augmented Generation)
+// - Embeddings: HuggingFace (Xenova/all-MiniLM-L6-v2) chạy local
+// - Vector store: FAISS
+// - LLM sinh câu trả lời: Google Gemini (ChatGoogleGenerativeAI)
+// - Bộ nhớ hội thoại: ConversationBuffer theo sessionId
+// - Chuỗi: history-aware retriever + stuff documents (ConversationalRetrievalChain)
+// Nguồn tri thức: sản phẩm trong MongoDB + tài liệu (.txt/.md) + thông tin công ty
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-// Simple in-memory vector store for product recommendation
+import Product from '../models/Product.js';
+import { companyInfo } from '../data/companyInfo.js';
+
+import { HuggingFaceTransformersEmbeddings } from '@langchain/community/embeddings/hf_transformers';
+import { FaissStore } from '@langchain/community/vectorstores/faiss';
+import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
+import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
+import { Document } from '@langchain/core/documents';
+import { ChatPromptTemplate, MessagesPlaceholder } from '@langchain/core/prompts';
+import { HumanMessage, AIMessage } from '@langchain/core/messages';
+import { createStuffDocumentsChain } from 'langchain/chains/combine_documents';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const KNOWLEDGE_DIR = path.resolve(__dirname, '../data/knowledge');
+
+const EMBEDDING_MODEL = process.env.RAG_EMBEDDING_MODEL || 'Xenova/all-MiniLM-L6-v2';
+const CHAT_MODEL =
+	process.env.GEMINI_CHAT_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const MAX_HISTORY_TURNS = 8; // số lượt hội thoại tối đa lưu lại cho mỗi phiên
+// Ngưỡng độ tương đồng (cosine). Dưới ngưỡng -> coi như không liên quan,
+// KHÔNG gợi ý sản phẩm (vd: gõ từ vô nghĩa, hỏi lạc đề).
+const MIN_PRODUCT_SCORE = Number(process.env.RAG_MIN_SCORE ?? 0.35);
+// Ngưỡng để đưa tài liệu (công ty/knowledge) vào ngữ cảnh trả lời.
+const CONTEXT_MIN_SCORE = Number(process.env.RAG_CONTEXT_MIN_SCORE ?? 0.25);
+// Giới hạn tốc độ sinh: ít token hơn = phản hồi nhanh hơn.
+const MAX_OUTPUT_TOKENS = Number(process.env.GEMINI_MAX_OUTPUT_TOKENS ?? 600);
+const NO_MATCH_ANSWER = 'Xin lỗi, mình chưa có thông tin phù hợp với yêu cầu của bạn.';
+
+const SYSTEM_PROMPT = `Bạn là trợ lý tư vấn của cửa hàng nhạc cụ GuitarMaster.
+Trả lời bằng tiếng Việt, thân thiện, ngắn gọn và CHỈ dựa vào thông tin trong phần CONTEXT bên dưới.
+- Nếu câu hỏi về sản phẩm: ưu tiên đúng loại nhạc cụ và đúng khoảng ngân sách (nếu có); đề xuất tối đa 3 sản phẩm phù hợp nhất, nêu rõ tên và giá.
+- Nếu câu hỏi về cửa hàng (địa chỉ, hotline, chính sách...): trả lời dựa trên thông tin công ty trong CONTEXT.
+- Nếu không tìm thấy thông tin phù hợp trong CONTEXT, hãy nói: "Xin lỗi, mình chưa có thông tin phù hợp với yêu cầu của bạn."
+Tuyệt đối không bịa thông tin nằm ngoài CONTEXT.
+
+CONTEXT:
+{context}`;
+
+// ===== Trạng thái dùng chung =====
 const state = {
-	model: null,
-	initializing: false,
+	embeddings: null,
+	vectorStore: null,
+	llm: null,
+	combineChainPromise: null, // cache chuỗi sinh câu trả lời
 	ready: false,
-	items: [], // [{ id, slug, name, description, price, currency }]
-	vectors: null, // Float32Array flat, length = items.length * dim
-	dim: 384, // default for all-MiniLM-L6-v2
+	building: null, // promise lock khi đang build index
 };
 
-function textForEmbedding(item) {
-	const parts = [
-		item.name || '',
-		item.description || '',
-		item.brandName ? `Thương hiệu: ${item.brandName}` : '',
-		item.categoryName ? `Danh mục: ${item.categoryName}` : '',
-		item.type ? `Loại: ${item.type}` : '',
-	];
-	return parts.filter(Boolean).join('\n');
-}
+// Bộ nhớ hội thoại: sessionId -> mảng BaseMessage (ConversationBufferMemory)
+const histories = new Map();
 
-async function ensureModel() {
-	if (state.model) return state.model;
-	if (state.initializing) {
-		// wait until initialized by another request
-		while (state.initializing) {
-			// eslint-disable-next-line no-await-in-loop
-			await new Promise((r) => setTimeout(r, 200));
-		}
-		return state.model;
-	}
-	state.initializing = true;
-	try {
-		// all-MiniLM-L6-v2 is small and fast; works decently for vi
-		state.model = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
-		state.dim = 384;
-		return state.model;
-	} finally {
-		state.initializing = false;
-	}
-}
-
-function normalizeVector(vec) {
-	let norm = 0;
-	for (let i = 0; i < vec.length; i++) norm += vec[i] * vec[i];
-	norm = Math.sqrt(norm) || 1;
-	for (let i = 0; i < vec.length; i++) vec[i] = vec[i] / norm;
-	return vec;
-}
-
-function dot(a, b) {
-	let s = 0;
-	for (let i = 0; i < a.length; i++) s += a[i] * b[i];
-	return s;
-}
-
+// ===== Tiện ích =====
 function toNumberSafe(value) {
 	if (typeof value === 'number' && Number.isFinite(value)) return value;
 	if (typeof value === 'string') {
-		// remove all non-digits
 		const digits = value.replace(/[^\d]/g, '');
 		if (!digits) return null;
 		const n = Number(digits);
@@ -77,253 +79,319 @@ function effectivePrice(price) {
 	return saleNum ?? baseNum;
 }
 
-export async function buildProductIndex() {
-	await ensureModel();
-	// Fetch minimal product fields
+function getEmbeddings() {
+	if (state.embeddings) return state.embeddings;
+	state.embeddings = new HuggingFaceTransformersEmbeddings({ model: EMBEDDING_MODEL });
+	return state.embeddings;
+}
+
+function getLLM() {
+	if (state.llm) return state.llm;
+	const apiKey = String(
+		process.env.GEMINI_API_KEY ||
+			process.env.GOOGLE_AI_API_KEY ||
+			process.env.GOOGLE_API_KEY ||
+			'',
+	).trim();
+	if (!apiKey) return null; // không có key -> dùng fallback truy xuất
+	state.llm = new ChatGoogleGenerativeAI({
+		apiKey,
+		model: CHAT_MODEL,
+		temperature: 0,
+		maxOutputTokens: MAX_OUTPUT_TOKENS,
+		// Fail nhanh khi Gemini lỗi/quá tải (429) -> chuyển fallback ngay,
+		// tránh SDK tự retry với backoff dài (có thể chờ ~90s).
+		maxRetries: Number(process.env.GEMINI_MAX_RETRIES ?? 0),
+		timeout: Number(process.env.GEMINI_TIMEOUT_MS ?? 20000),
+	});
+	return state.llm;
+}
+
+// Chuỗi sinh câu trả lời (stuff documents) — tạo 1 lần rồi tái sử dụng.
+function getCombineChain() {
+	if (state.combineChainPromise) return state.combineChainPromise;
+	const llm = getLLM();
+	if (!llm) return null;
+	const qaPrompt = ChatPromptTemplate.fromMessages([
+		['system', SYSTEM_PROMPT],
+		new MessagesPlaceholder('chat_history'),
+		['user', '{input}'],
+	]);
+	state.combineChainPromise = createStuffDocumentsChain({ llm, prompt: qaPrompt });
+	return state.combineChainPromise;
+}
+
+// ===== Indexing: chuẩn bị tài liệu =====
+async function buildProductDocuments() {
 	const products = await Product.find({ isActive: true })
 		.select('name description slug price brand category attributes')
 		.populate('brand category', 'name');
 
-	state.items = products.map((p) => ({
-		id: String(p._id),
-		slug: p.slug,
-		name: p.name,
-		description: p.description || '',
-		price: effectivePrice(p.price),
-		currency: (p.price && p.price.currency) || 'VND',
-		brandName: p.brand?.name,
-		categoryName: p.category?.name,
-		type: p.attributes?.type,
-	}));
+	return products.map((p) => {
+		const price = effectivePrice(p.price);
+		const currency = (p.price && p.price.currency) || 'VND';
+		const brandName = p.brand?.name || '';
+		const categoryName = p.category?.name || '';
+		const type = p.attributes?.type || '';
+		const content = [
+			`Sản phẩm: ${p.name}`,
+			p.description ? `Mô tả: ${p.description}` : '',
+			brandName ? `Thương hiệu: ${brandName}` : '',
+			categoryName ? `Danh mục: ${categoryName}` : '',
+			type ? `Loại nhạc cụ: ${type}` : '',
+			price != null ? `Giá: ${price.toLocaleString('vi-VN')} ${currency}` : '',
+		]
+			.filter(Boolean)
+			.join('\n');
 
-	// Embed all items
-	const texts = state.items.map((it) => textForEmbedding(it));
-	const batchSize = 32;
-	const all = new Float32Array(state.items.length * state.dim);
-	for (let i = 0; i < texts.length; i += batchSize) {
-		// eslint-disable-next-line no-await-in-loop
-		const outputs = await state.model(texts.slice(i, i + batchSize), {
-			pooling: 'mean',
-			normalize: true,
+		return new Document({
+			pageContent: content,
+			metadata: {
+				kind: 'product',
+				id: String(p._id),
+				slug: p.slug,
+				name: p.name,
+				price,
+				currency,
+				brandName,
+				categoryName,
+				type,
+			},
 		});
-		// outputs is a Tensor-like; ensure Float32Array
-		const chunk = Array.isArray(outputs) ? outputs : [outputs];
-		for (let j = 0; j < chunk.length; j++) {
-			const emb = chunk[j].data ? chunk[j].data : chunk[j];
-			const vec = emb instanceof Float32Array ? emb : Float32Array.from(emb);
-			// vec already normalized when normalize:true, but safeguard
-			normalizeVector(vec);
-			all.set(vec, (i + j) * state.dim);
+	});
+}
+
+function companyDocText() {
+	const c = companyInfo;
+	return [
+		`Tên công ty: ${c.name}`,
+		`Hotline mua hàng: ${c.phones.sales} (miễn phí)`,
+		`Khiếu nại/Bảo hành: ${c.phones.complaint}`,
+		`Email: ${c.email}`,
+		`Địa chỉ: ${c.address}`,
+		`Thời gian phục vụ: ${c.hours}`,
+		`Website: ${c.website}`,
+		`Hỗ trợ thanh toán: ${c.payments.join(', ')}`,
+		`Chứng nhận: ${c.certifications.join(', ')}`,
+		`Trang giới thiệu: ${c.routes.about}`,
+		`Trang liên hệ: ${c.routes.contact}`,
+		`Hệ thống showroom/đại lý: ${c.routes.showrooms}`,
+		`Mua trả góp: ${c.routes.installment}`,
+		`Chính sách giao hàng - đổi trả: ${c.routes.shippingReturns}`,
+		`Chính sách bảo hành: ${c.routes.warrantyPolicy}`,
+		`Tra cứu/kích hoạt bảo hành: ${c.routes.warrantyLookup}`,
+		`Hướng dẫn mua hàng: ${c.routes.howToBuy}`,
+		`Thanh toán & bảo mật: ${c.routes.paymentSecurity}`,
+	].join('\n');
+}
+
+async function buildKnowledgeDocuments() {
+	const docs = [
+		new Document({
+			pageContent: companyDocText(),
+			metadata: { kind: 'company', source: 'companyInfo' },
+		}),
+	];
+
+	try {
+		const files = fs.existsSync(KNOWLEDGE_DIR) ? fs.readdirSync(KNOWLEDGE_DIR) : [];
+		const splitter = new RecursiveCharacterTextSplitter({
+			chunkSize: 1200,
+			chunkOverlap: 200,
+		});
+		for (const file of files) {
+			const ext = path.extname(file).toLowerCase();
+			if (!['.txt', '.md'].includes(ext)) continue;
+			const full = path.join(KNOWLEDGE_DIR, file);
+			const raw = fs.readFileSync(full, 'utf8');
+			if (!raw.trim()) continue;
+			// eslint-disable-next-line no-await-in-loop
+			const chunks = await splitter.splitText(raw);
+			chunks.forEach((chunk, i) =>
+				docs.push(
+					new Document({
+						pageContent: chunk,
+						metadata: { kind: 'doc', source: file, chunk: i },
+					}),
+				),
+			);
 		}
+	} catch (e) {
+		console.warn('[rag] Không nạp được tài liệu knowledge:', e?.message);
 	}
-	state.vectors = all;
-	state.ready = true;
-	return { count: state.items.length, dim: state.dim };
+
+	return docs;
+}
+
+// ===== Indexing: build vector store FAISS =====
+export async function buildProductIndex() {
+	if (state.building) return state.building;
+
+	state.building = (async () => {
+		const embeddings = getEmbeddings();
+		const [productDocs, knowledgeDocs] = await Promise.all([
+			buildProductDocuments(),
+			buildKnowledgeDocuments(),
+		]);
+		const docs = [...productDocs, ...knowledgeDocs];
+		if (docs.length === 0) {
+			docs.push(
+				new Document({ pageContent: 'Chưa có dữ liệu.', metadata: { kind: 'empty' } }),
+			);
+		}
+		state.vectorStore = await FaissStore.fromDocuments(docs, embeddings);
+		state.ready = true;
+		return {
+			count: docs.length,
+			products: productDocs.length,
+			docs: knowledgeDocs.length,
+		};
+	})();
+
+	try {
+		return await state.building;
+	} finally {
+		state.building = null;
+	}
 }
 
 export function isIndexReady() {
-	return state.ready && state.items.length > 0 && state.vectors;
+	return state.ready && !!state.vectorStore;
 }
 
 export function invalidateProductIndex() {
-	// Mark current in-memory index as dirty; sẽ build lại ở lần truy vấn tiếp theo
-	state.items = [];
-	state.vectors = null;
+	// Đánh dấu index cần build lại ở lần truy vấn kế tiếp
 	state.ready = false;
+	state.vectorStore = null;
 }
 
-async function embedQuery(text) {
-	await ensureModel();
-	const out = await state.model(text, { pooling: 'mean', normalize: true });
-	const vec = out.data ? out.data : out;
-	const v = vec instanceof Float32Array ? vec : Float32Array.from(vec);
-	return normalizeVector(v);
+// FAISS dùng khoảng cách L2 trên vector đã chuẩn hoá: cosine = 1 - L2^2 / 2
+function l2ToCosine(distance) {
+	return 1 - (distance * distance) / 2;
 }
 
-export async function retrieveProducts({ query, k = 8, budgetMin, budgetMax }) {
+// Một lần truy xuất duy nhất: trả về cả danh sách sản phẩm (đã lọc ngưỡng + ngân sách)
+// và các tài liệu ngữ cảnh để sinh câu trả lời. Không có gì liên quan -> rỗng.
+async function retrieveScored({ query, k, budgetMin, budgetMax }) {
+	const pairs = await state.vectorStore.similaritySearchWithScore(query, Math.max(k, 12));
+	const seen = new Set();
+	const items = [];
+	const productDocs = [];
+	const infoDocs = [];
+
+	for (const [doc, distance] of pairs) {
+		const m = doc.metadata || {};
+		const cos = l2ToCosine(distance);
+		if (m.kind === 'product') {
+			if (cos < MIN_PRODUCT_SCORE) continue;
+			const price = m.price;
+			if (Number.isFinite(budgetMin) && price != null && price < budgetMin) continue;
+			if (Number.isFinite(budgetMax) && price != null && price > budgetMax) continue;
+			if (seen.has(m.id)) continue;
+			seen.add(m.id);
+			items.push({
+				id: m.id,
+				slug: m.slug,
+				name: m.name,
+				price: price ?? null,
+				currency: m.currency || 'VND',
+				brandName: m.brandName,
+				categoryName: m.categoryName,
+				type: m.type,
+			});
+			productDocs.push(doc);
+		} else if (cos >= CONTEXT_MIN_SCORE) {
+			infoDocs.push(doc);
+		}
+	}
+
+	// Giới hạn ngữ cảnh để giảm token -> phản hồi nhanh hơn
+	const context = [...productDocs.slice(0, 5), ...infoDocs.slice(0, 3)];
+	return { items, context };
+}
+
+function getHistory(sessionId) {
+	if (!sessionId) return [];
+	return histories.get(sessionId) || [];
+}
+
+function saveHistory(sessionId, userText, botText) {
+	if (!sessionId) return;
+	const prev = histories.get(sessionId) || [];
+	const next = [...prev, new HumanMessage(userText), new AIMessage(botText)].slice(
+		-MAX_HISTORY_TURNS * 2,
+	);
+	histories.set(sessionId, next);
+}
+
+function buildBudgetedInput(message, budgetMin, budgetMax) {
+	const parts = [];
+	if (Number.isFinite(budgetMin)) parts.push(`từ ${budgetMin.toLocaleString('vi-VN')}đ`);
+	if (Number.isFinite(budgetMax)) parts.push(`đến ${budgetMax.toLocaleString('vi-VN')}đ`);
+	return parts.length ? `${message}\n(Ngân sách mong muốn: ${parts.join(' ')})` : message;
+}
+
+// Ghép câu hỏi gần nhất của người dùng vào truy vấn để câu hỏi nối tiếp
+// (vd: "rẻ hơn không?") vẫn truy xuất đúng ngữ cảnh — rẻ, không cần gọi LLM.
+function buildRetrievalQuery(input, chatHistory) {
+	const lastUser = [...(chatHistory || [])]
+		.reverse()
+		.find((m) => m?._getType?.() === 'human');
+	const prev = lastUser && typeof lastUser.content === 'string' ? lastUser.content : '';
+	return prev ? `${prev} ${input}` : input;
+}
+
+// ===== Trả lời câu hỏi (Generation) =====
+export async function answerQuestion({ message, budgetMin, budgetMax, sessionId, k = 6 }) {
 	if (!isIndexReady()) {
 		await buildProductIndex();
 	}
-	const qv = await embedQuery(query);
-	const scores = [];
-	for (let i = 0; i < state.items.length; i++) {
-		const start = i * state.dim;
-		const v = state.vectors.subarray(start, start + state.dim);
-		const s = dot(qv, v); // cosine since both normalized
-		scores.push([i, s]);
-	}
-	// Filter by budget if provided
-	const hasBudget = Number.isFinite(budgetMin) || Number.isFinite(budgetMax);
-	const filtered = hasBudget
-		? scores.filter(([idx]) => {
-				const price = state.items[idx].price;
-				if (price == null) return false;
-				if (Number.isFinite(budgetMin) && price < budgetMin) return false;
-				if (Number.isFinite(budgetMax) && price > budgetMax) return false;
-				return true;
-		  })
-		: scores;
-	filtered.sort((a, b) => b[1] - a[1]);
-	const top = filtered.slice(0, k).map(([idx, score]) => ({
-		score,
-		...state.items[idx],
-	}));
-	return top;
-}
 
-function formatContext(products) {
-	return products
-		.map(
-			(p, i) =>
-				`[${i + 1}] ${p.name}\nGiá: ${p.price?.toLocaleString('vi-VN')} ${p.currency}\nDanh mục: ${p.categoryName || '-'}; Thương hiệu: ${p.brandName || '-'}\nSlug: ${p.slug}`,
-		)
-		.join('\n\n');
-}
+	const input = buildBudgetedInput(message, budgetMin, budgetMax);
+	const chatHistory = getHistory(sessionId);
 
-function detectInstruments(text) {
-	const t = String(text || '').toLowerCase();
-	const map = {
-		guitar: ['guitar', 'đàn guitar'],
-		ukulele: ['ukulele', 'uke'],
-		organ: ['organ', 'keyboard'],
-		violin: ['violin', 'đàn violin'],
-		drum: ['trống', 'drum'],
-	};
-	const found = [];
-	for (const [key, kws] of Object.entries(map)) {
-		if (kws.some((kw) => t.includes(kw))) found.push(key);
-	}
-	return found;
-}
-
-function matchesInstrument(item, instruments) {
-	if (!instruments?.length) return true;
-	const name = (item.name || '').toLowerCase();
-	const desc = (item.description || '').toLowerCase();
-	const cat = (item.categoryName || '').toLowerCase();
-	const type = (item.type || '').toLowerCase();
-	return instruments.some((inst) => {
-		return (
-			cat.includes(inst) ||
-			type.includes(inst) ||
-			name.includes(inst) ||
-			desc.includes(inst)
-		);
+	// Truy xuất MỘT lần: lấy cả sản phẩm gợi ý (đã lọc ngưỡng + ngân sách) lẫn ngữ cảnh.
+	const retrievalQuery = buildRetrievalQuery(input, chatHistory);
+	const { items, context } = await retrieveScored({
+		query: retrievalQuery,
+		k,
+		budgetMin,
+		budgetMax,
 	});
-}
 
-async function callOllamaChat({ system, prompt, model }) {
-	const host = process.env.OLLAMA_HOST || 'http://localhost:11434';
-	const body = {
-		model: model || process.env.OLLAMA_MODEL || 'qwen2.5:3b',
-		messages: [
-			{ role: 'system', content: system },
-			{ role: 'user', content: prompt },
-		],
-		stream: false,
-	};
-	const res = await fetch(`${host}/api/chat`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(body),
-	});
-	if (!res.ok) throw new Error(`Ollama error ${res.status}`);
-	const data = await res.json();
-	// data.message.content in newer versions; fallback to data.response for /generate
-	return data?.message?.content || data?.response || '';
-}
-
-export async function answerQuestion({ message, budgetMin, budgetMax, k = 6 }) {
-	// Company FAQ early exit
-	if (isCompanyQuery(message)) {
-		return { answer: answerCompanyQuestion(message), items: [] };
+	// Không có gì liên quan (từ vô nghĩa / lạc đề) -> trả lời ngay, KHÔNG gọi Gemini.
+	if (context.length === 0) {
+		saveHistory(sessionId, message, NO_MATCH_ANSWER);
+		return { answer: NO_MATCH_ANSWER, items: [] };
 	}
 
-	// Instrument-aware retrieval
-	const instruments = detectInstruments(message);
-	let retrieved = await retrieveProducts({
-		query: message,
-		k: Math.max(k, 12),
-		budgetMin: Number.isFinite(budgetMin) ? budgetMin : undefined,
-		budgetMax: Number.isFinite(budgetMax) ? budgetMax : undefined,
-	});
-	if (instruments.length) {
-		const filtered = retrieved.filter((it) => matchesInstrument(it, instruments));
-		if (filtered.length >= Math.min(3, k)) {
-			retrieved = filtered.slice(0, k);
-		} else {
-			const more = await retrieveProducts({
-				query: `${message} ${instruments.join(' ')}`,
-				k: 40,
-				budgetMin: Number.isFinite(budgetMin) ? budgetMin : undefined,
-				budgetMax: Number.isFinite(budgetMax) ? budgetMax : undefined,
-			});
-			const again = more.filter((it) => matchesInstrument(it, instruments));
-			if (again.length === 0) {
-				return {
-					answer: 'Xin lỗi, không có sản phẩm phù hợp với nhu cầu/ngân sách của bạn.',
-					items: [],
-				};
-			}
-			retrieved = again.slice(0, k);
-		}
-	} else {
-		retrieved = retrieved.slice(0, k);
-	}
-
-	// If user has budget constraints and nothing fits, return apology instead of off-budget suggestions
-	if (retrieved.length === 0 && (Number.isFinite(budgetMin) || Number.isFinite(budgetMax))) {
-		return {
-			answer: 'Xin lỗi, không có sản phẩm phù hợp với nhu cầu/ngân sách của bạn.',
-			items: [],
-		};
-	}
-
-	// Guard for nonsense queries: nếu không phát hiện loại nhạc cụ và độ tương đồng rất thấp
-	if (retrieved.length === 0) {
-		return {
-			answer: 'Xin lỗi, không có sản phẩm phù hợp với nhu cầu/ngân sách của bạn.',
-			items: [],
-		};
-	}
-	if (!instruments.length) {
-		const topScore = retrieved?.[0]?.score ?? 0;
-		if (topScore < 0.1) {
-			return {
-				answer: 'Xin lỗi, không có sản phẩm phù hợp với nhu cầu/ngân sách của bạn.',
-				items: [],
-			};
+	const chainPromise = getCombineChain();
+	if (chainPromise) {
+		try {
+			const chain = await chainPromise;
+			const answer = (
+				await chain.invoke({ input, chat_history: chatHistory, context })
+			).trim();
+			saveHistory(sessionId, message, answer);
+			return { answer, items };
+		} catch (e) {
+			console.warn('[rag] Gemini lỗi, dùng fallback truy xuất:', e?.message);
 		}
 	}
 
-	const ctx = formatContext(retrieved);
-	const sys =
-		'Bạn là trợ lý tư vấn sản phẩm nhạc cụ. Trả lời bằng tiếng Việt, ngắn gọn, chỉ dựa vào CONTEXT. Luôn ưu tiên đúng loại nhạc cụ người dùng hỏi. Nếu có ngân sách, CHỈ gợi ý trong khoảng ngân sách; nếu không có sản phẩm phù hợp thì nói: "Xin lỗi, không có sản phẩm phù hợp nhu cầu của bạn."';
-	const prompt =
-		`CÂU HỎI: ${message}\n\nCONTEXT (Danh sách ứng viên):\n${ctx}\n\nYÊU CẦU: Đề xuất 3 sản phẩm phù hợp nhất với câu hỏi/ngân sách (nếu có). Trình bày gọn, nêu tên và giá.`;
-
-	// Try local Ollama (optional). If unavailable, fallback to a templated answer.
-	let answer;
-	try {
-		answer = await callOllamaChat({ system: sys, prompt });
-	} catch {
-		const items = retrieved.slice(0, 3);
-		answer =
-			items.length === 0
-				? 'Hiện chưa tìm thấy sản phẩm phù hợp trong tầm giá hoặc yêu cầu.'
-				: `Gợi ý nhanh:\n` +
-				  items
-						.map(
-							(p, i) =>
-								`${i + 1}. ${p.name} — ${p.price?.toLocaleString('vi-VN')} ${p.currency} (/${p.slug})`,
-						)
-						.join('\n');
-	}
-
-	return {
-		answer,
-		items: retrieved, // return for UI listing
-	};
+	// Fallback khi không có Gemini API key hoặc chain lỗi: chỉ truy xuất + template
+	const answer = items.length
+		? 'Gợi ý một số sản phẩm phù hợp:\n' +
+		  items
+				.slice(0, 3)
+				.map(
+					(p, i) =>
+						`${i + 1}. ${p.name} — ${
+							p.price != null ? p.price.toLocaleString('vi-VN') : 'Liên hệ'
+						} ${p.currency} (/products/${p.slug})`,
+				)
+				.join('\n')
+		: NO_MATCH_ANSWER;
+	saveHistory(sessionId, message, answer);
+	return { answer, items };
 }
-
-

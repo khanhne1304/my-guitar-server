@@ -20,7 +20,8 @@ export async function createOrderFromCart(req, res, next) {
       req.body.shippingAddress,
       req.body.paymentMethod,
       req.body.items,
-      req.body.couponCode || null
+      req.body.couponCode || null,
+      req.body.shipFee || 0,
     );
 
     res.status(201).json(order);

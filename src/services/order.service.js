@@ -6,7 +6,14 @@ import Coupon from '../models/Coupon.js';
 import { applyCoupon } from './coupon.service.js';
 import { executeWithTransaction } from '../utils/transactionHelper.js';
 
-export async function createOrderFromCartService(userId, shippingAddress, paymentMethod, providedItems, couponCode = null) {
+export async function createOrderFromCartService(
+  userId,
+  shippingAddress,
+  paymentMethod,
+  providedItems,
+  couponCode = null,
+  shipFee = 0,
+) {
   return await executeWithTransaction(async (session) => {
     // Nếu client cung cấp items hợp lệ, ưu tiên dùng chúng; nếu không thì dùng cart trên server
     let sourceItems = [];
@@ -80,7 +87,8 @@ export async function createOrderFromCartService(userId, shippingAddress, paymen
       }
     }
 
-    const total = Math.max(0, subtotal - discount);
+    const shippingFee = Math.max(0, Number(shipFee) || 0);
+    const total = Math.max(0, subtotal + shippingFee - discount);
 
     // Tạo đơn hàng
     const orderOptions = session ? { session } : {};
@@ -91,6 +99,7 @@ export async function createOrderFromCartService(userId, shippingAddress, paymen
       paymentMethod: paymentMethod || 'cod',
       status: 'pending',
       subtotal,
+      shipFee: shippingFee,
       total,
       coupon: couponData,
     }], orderOptions);
