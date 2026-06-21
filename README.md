@@ -118,10 +118,13 @@ Nhận diện hợp âm **chỉ** qua ChordMini. Phân tích `/api/chord-practic
 | Biến | Mô tả |
 | --- | --- |
 | `CHORDMINI_BEAT_DETECTOR` | `madmom` (mặc định), `librosa`, `beat-transformer` |
-| `LLM_API_KEY` | Key **OpenAI-compatible** cho gợi ý luyện tập |
-| `LLM_API_BASE_URL` | Ví dụ `https://aiapiv2.pekpik.com/v1` |
+| `PRACTICE_ADVICE_PROVIDER` | `deepseek` (mặc định), `openai`, hoặc `gemini` |
+| `DEEPSEEK_API_KEY` | Key DeepSeek khi `PRACTICE_ADVICE_PROVIDER=deepseek` |
+| `DEEPSEEK_PRACTICE_ADVICE_MODEL` | `deepseek-chat` (mặc định) |
+| `DEEPSEEK_API_BASE_URL` | `https://api.deepseek.com/v1` (mặc định) |
+| `LLM_API_KEY` | Key **OpenAI-compatible** khi `PRACTICE_ADVICE_PROVIDER=openai` |
+| `LLM_API_BASE_URL` | Ví dụ `https://api.openai.com/v1` |
 | `LLM_PRACTICE_ADVICE_MODEL` | `gpt-3.5-turbo` (mặc định) |
-| `PRACTICE_ADVICE_PROVIDER` | `openai` (mặc định) hoặc `gemini` |
 | `GEMINI_API_KEY` | Chỉ khi `PRACTICE_ADVICE_PROVIDER=gemini` |
 
 Cloud `chordmini.me` trả lỗi **`Missing App Check token`** (Firebase App Check) — chỉ chạy được ChordMini **trên máy bạn** cổng `5001`.
