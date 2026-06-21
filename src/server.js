@@ -169,6 +169,15 @@ async function startServer() {
 
     server.listen(PORT, () => {
       console.log('🚀 API on :' + PORT);
+      // Warm-up chatbot RAG (tải model embedding + build FAISS index) chạy nền
+      // để câu hỏi đầu tiên phản hồi nhanh. Không chặn quá trình khởi động.
+      import('./services/rag.service.js')
+        .then(({ buildProductIndex }) =>
+          buildProductIndex()
+            .then((m) => console.log('🤖 RAG index sẵn sàng:', m))
+            .catch((e) => console.warn('⚠️ RAG warm-up lỗi:', e?.message)),
+        )
+        .catch(() => {});
     });
 
     // Xử lý lỗi khi server không thể lắng nghe
