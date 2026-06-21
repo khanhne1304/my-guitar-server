@@ -1,6 +1,6 @@
 /**
 
- * Gợi ý luyện tập — LLM (OpenAI-compatible / Gemini) + fallback huấn luyện viên local.
+ * Gợi ý luyện tập — LLM (DeepSeek / OpenAI-compatible / Gemini) + fallback huấn luyện viên local.
 
  */
 
@@ -17,6 +17,8 @@ import {
   normalizeLevel,
 
 } from './practiceAdviceAnalysis.js';
+
+import { buildPracticeMetrics } from './practiceMetrics.service.js';
 
 import {
 
@@ -50,136 +52,43 @@ const MAX_TIMELINE = 12;
 
 
 
-const SYSTEM_PROMPT = `Bạn là huấn luyện viên guitar cá nhân, dạy người Việt mới học đến trung cấp.
+const SYSTEM_PROMPT = `Bạn là một giáo viên guitar chuyên nghiệp với hơn 15 năm kinh nghiệm giảng dạy.
 
-
-
-Nhiệm vụ: đánh giá buổi luyện tập guitar như một giáo viên thực tế — không phải báo cáo kỹ thuật.
-
-
-
-Nguyên tắc bắt buộc:
-
-- Luôn giải thích bằng ngôn ngữ đơn giản, dễ hiểu.
-
-- KHÔNG nhắc trực tiếp số liệu kỹ thuật (%, BPM deviation, confidence score, matched/referenceLen...) trong phản hồi.
-
-- Chuyển mọi số liệu thành nhận xét thực tế, dễ cảm nhận (vd: "bạn nhớ phần lớn hợp âm" thay vì "accuracy 78%").
-
-- Luôn bắt đầu bằng điểm mạnh của người chơi.
-
-- Chỉ tập trung tối đa 3 lỗi quan trọng nhất.
-
-- Mỗi lỗi phải giải thích nguyên nhân có thể xảy ra.
-
-- Mỗi lỗi phải kèm cách luyện tập cụ thể.
-
-- Không làm người học cảm thấy bị chê trách — giọng điệu khích lệ, thân thiện.
-
-- Khuyến khích người học tiếp tục luyện tập.
-
+Nhiệm vụ:
+- Đánh giá buổi luyện tập dựa trên dữ liệu phân tích được cung cấp.
+- Chỉ nhận xét dựa trên dữ liệu thực tế trong context (chordAccuracy, wrongChords, transitionAnalysis, tempoAnalysis, sections, skillScores, songValidation).
+- Không khen chung chung — mỗi điểm mạnh phải gắn với dữ liệu cụ thể.
+- Không sử dụng nhận xét mơ hồ — nêu rõ hợp âm, đoạn, tempo khi có trong dữ liệu.
+- Giải thích nguyên nhân gây lỗi dựa trên wrongChords, worstTransitions, sections accuracy thấp.
+- Đề xuất bài tập sửa lỗi cụ thể (tên hợp âm, cặp chuyển, BPM cụ thể).
+- Đề xuất tempo luyện tập tiếp theo trong recommendedTempo.
+- Đưa mục tiêu rõ ràng cho buổi học kế tiếp trong nextSessionGoal.
+- Nếu dữ liệu không đủ (null, mảng rỗng, available: false) thì ghi rõ "thiếu dữ liệu" thay vì suy đoán.
 - Chỉ dùng tiếng Việt tự nhiên.
+- Không markdown. Không thêm text ngoài JSON.
 
-- Không markdown.
+Khi songValidation.isCorrectSong = false: nêu rõ trong overview và songAssessment, không khen nhớ bài nếu category là incorrect/partially_correct.
 
-- Không thêm text ngoài JSON.
+performanceLevel phải là một trong: Beginner | Intermediate | Advanced — khớp skillLevel trong context.
 
-- Không bịa dữ liệu không có trong context.
-
-- Nếu dữ liệu không chắc, dùng: "có xu hướng", "dường như", "khả năng cao".
-
-
-
-Khi có advancedAnalysis trong context, hãy tham khảo (nếu available: true):
-
-- Chuyển hợp âm (chordTransition)
-
-- Độ ổn định nhịp (rhythmStability)
-
-- Độ chính xác BPM (bpmAccuracy)
-
-- Độ tự tin nhận diện hợp âm (chordConfidence)
-
-- Khả năng nhớ hợp âm (chordMemory)
-
-- Mức độ thành thạo bài hát (songMastery)
-
-
-
-Khi có songValidation trong context:
-
-- Ngoài đánh giá kỹ năng chơi guitar, xác định người chơi có đang chơi đúng bài hát tham chiếu hay không dựa trên songValidation.
-
-- Nếu songValidation.isCorrectSong = false thì phải nêu rõ bản chơi hiện tại chưa khớp với bài hát tham chiếu (trong overview và songAssessment).
-
-- Không được mô tả là người chơi đã nhớ phần lớn bài hát nếu songValidation.category là incorrect hoặc partially_correct.
-
-- Nếu songValidation.isCorrectSong = true thì đánh giá kỹ năng như bình thường.
-
-
-
-Trường level trong JSON phải khớp với skillLevel trong context (Beginner | Intermediate | Advanced).
-
-
-
-Trả về đúng một JSON:
-
-
+Trả về đúng một JSON hợp lệ:
 
 {
-
-  "level": "Beginner | Intermediate | Advanced",
-
-  "overview": "Tổng quan ngắn gọn, bắt đầu bằng điểm mạnh",
-
-  "strengths": ["Điểm mạnh 1", "Điểm mạnh 2"],
-
+  "overview": "",
+  "performanceLevel": "Beginner | Intermediate | Advanced",
+  "strengths": [],
+  "weaknesses": [],
   "mainProblems": [
-
-    {
-
-      "problem": "Mô tả lỗi bằng ngôn ngữ dễ hiểu",
-
-      "cause": "Nguyên nhân có thể xảy ra",
-
-      "impact": "Ảnh hưởng đến cách nghe bài",
-
-      "solution": "Cách luyện tập cụ thể"
-
-    }
-
+    { "problem": "", "cause": "", "impact": "", "solution": "" }
   ],
-
-  "prioritySkill": "chord_transitions | chord_memory | rhythm | tone | dynamics",
-
   "practicePlan": [
-
-    {
-
-      "title": "Tên bài tập",
-
-      "reason": "Vì sao cần luyện",
-
-      "exercise": "Hướng dẫn cụ thể",
-
-      "durationMinutes": 10
-
-    }
-
+    { "exercise": "", "durationMinutes": 10, "goal": "" }
   ],
-
-  "nextGoal": "Mục tiêu cho buổi luyện tiếp theo",
-
-  "encouragement": "Lời động viên ngắn gọn",
-
-  "songAssessment": {
-
-    "isCorrectSong": true,
-
-    "summary": "Bạn đang chơi đúng bài hát với một số lỗi nhỏ."
-
-  }
-
+  "sectionFeedback": [],
+  "nextSessionGoal": "",
+  "recommendedTempo": 0,
+  "skillAssessment": {},
+  "songAssessment": { "isCorrectSong": true, "summary": "" }
 }`;
 
 
@@ -238,6 +147,40 @@ function getOpenAiModel() {
 
 
 
+function getDeepSeekApiKey() {
+
+  return String(process.env.DEEPSEEK_API_KEY || '').trim();
+
+}
+
+
+
+function getDeepSeekBaseUrl() {
+
+  const base = String(process.env.DEEPSEEK_API_BASE_URL || 'https://api.deepseek.com/v1').trim();
+
+  return base.replace(/\/$/, '');
+
+}
+
+
+
+function getDeepSeekModel() {
+
+  return (
+
+    process.env.DEEPSEEK_PRACTICE_ADVICE_MODEL ||
+
+    process.env.DEEPSEEK_MODEL ||
+
+    'deepseek-chat'
+
+  ).trim();
+
+}
+
+
+
 function getGeminiApiKey() {
 
   return String(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || '').trim();
@@ -268,13 +211,17 @@ function resolveProvider() {
 
   if (forced === 'gemini') return 'gemini';
 
+  if (forced === 'deepseek') return 'deepseek';
+
   if (forced === 'openai' || forced === 'openai-compatible') return 'openai';
 
   if (getOpenAiApiKey() && getOpenAiBaseUrl()) return 'openai';
 
+  if (getDeepSeekApiKey()) return 'deepseek';
+
   if (getGeminiApiKey()) return 'gemini';
 
-  return 'openai';
+  return 'deepseek';
 
 }
 
@@ -288,7 +235,7 @@ export function buildAnalysisContext(payload = {}) {
 
   const tempo = payload.tempoComparison || {};
 
-  const metrics = payload.chordRecognition?.metrics || {};
+  const recognitionMetrics = payload.chordRecognition?.metrics || {};
 
 
 
@@ -386,9 +333,9 @@ export function buildAnalysisContext(payload = {}) {
 
     recognition: {
 
-      segmentCount: metrics.n_chord_segments,
+      segmentCount: recognitionMetrics.n_chord_segments,
 
-      meanConfidence: metrics.mean_chord_confidence,
+      meanConfidence: recognitionMetrics.mean_chord_confidence,
 
     },
 
@@ -436,7 +383,47 @@ export function buildAnalysisContext(payload = {}) {
 
   baseContext.advancedAnalysis = buildAdvancedAnalysis(baseContext);
 
+  const practiceMetrics =
+    payload.practiceMetrics ||
+    buildPracticeMetrics({
+      comparison: cmp,
+      tempoComparison: tempo,
+      chordRecognition: payload.chordRecognition,
+      beatAnalysis: payload.beatAnalysis,
+      referenceSequence: cmp.referenceSequence || fullRefSeq,
+      predictedSequence: fullPredSeq,
+      predictedSegmentsRaw: payload.chordRecognition?.predicted_chords,
+      transposeSemitones: cmp.transposeSemitones,
+    });
 
+  baseContext.referenceSong = {
+    title: ref.title,
+    artist: ref.artist,
+    key: ref.key,
+    capo: ref.capo,
+    rhythm: ref.rhythm,
+    tempo: ref.tempo,
+    timeSignature: ref.timeSignature,
+    url: ref.url,
+    chordCount: ref.chordCount ?? cmp.referenceLen,
+  };
+
+  baseContext.comparison = {
+    chordAccuracy: practiceMetrics.chordAccuracy,
+    accuracyPercent,
+    matched: cmp.matched,
+    referenceLen: cmp.referenceLen,
+    compareNote: cmp.compareNote,
+    transposeSemitones: cmp.transposeSemitones,
+    hopamCapo: cmp.hopamCapo,
+    analyzedTranspose: cmp.analyzedTranspose,
+  };
+
+  baseContext.tempoAnalysis = practiceMetrics.tempoAnalysis;
+  baseContext.transitionAnalysis = practiceMetrics.transitionAnalysis;
+  baseContext.wrongChords = takeList(practiceMetrics.wrongChords, 20);
+  baseContext.sections = practiceMetrics.sections;
+  baseContext.skillScores = practiceMetrics.skillScores;
 
   return baseContext;
 
@@ -476,17 +463,21 @@ function sanitizePracticePlanItem(item) {
 
   const reason = sanitizeDisplayText(item.reason || item.ly_do || '');
 
+  const goal = sanitizeDisplayText(item.goal || item.muc_tieu || item.objective || '');
+
   const exercise = sanitizeDisplayText(item.exercise || item.bai_tap || item.huong_dan || '');
 
   const durationMinutes = Number(item.durationMinutes ?? item.duration ?? item.phut);
 
-  if (!title && !exercise) return null;
+  if (!title && !exercise && !goal) return null;
 
   return {
 
-    title: title || 'Bài tập luyện tập',
+    title: title || goal || 'Bài tập luyện tập',
 
-    reason,
+    reason: reason || goal,
+
+    goal: goal || reason,
 
     exercise,
 
@@ -502,19 +493,87 @@ function sanitizePracticePlanItem(item) {
 
 
 
+function sanitizeSectionFeedbackItem(item) {
+
+  if (!item || typeof item !== 'object') return null;
+
+  const section = sanitizeDisplayText(item.section || item.name || item.doan || '');
+
+  const feedback = sanitizeDisplayText(item.feedback || item.nhan_xet || item.comment || '');
+
+  if (!section && !feedback) return null;
+
+  return { section: section || 'Đoạn', feedback };
+
+}
+
+
+
+function sanitizeSkillAssessment(obj, context) {
+
+  const fromContext = context?.skillScores || {};
+
+  const src = obj && typeof obj === 'object' ? obj : {};
+
+  const pick = (key) => {
+
+    const v = Number(src[key] ?? fromContext[key]);
+
+    return Number.isFinite(v) ? Math.max(0, Math.min(100, Math.round(v))) : fromContext[key] ?? 0;
+
+  };
+
+  return {
+
+    chordAccuracy: pick('chordAccuracy'),
+
+    rhythm: pick('rhythm'),
+
+    tempoControl: pick('tempoControl'),
+
+    transitionSkill: pick('transitionSkill'),
+
+    overall: pick('overall'),
+
+  };
+
+}
+
+
+
 function normalizeAdviceObject(parsed, context) {
 
   if (!parsed || typeof parsed !== 'object') return null;
 
 
 
-  const fallbackAcc = context?.chordMatch?.accuracyPercent;
+  const fallbackAcc =
 
-  const fallbackDev = context?.tempo?.deviationPercent;
+    context?.chordMatch?.accuracyPercent ?? context?.comparison?.chordAccuracy?.accuracy;
+
+  const fallbackDev =
+
+    context?.tempo?.deviationPercent ??
+
+    (context?.tempoAnalysis?.tempoDifference != null
+
+      ? Math.abs(context.tempoAnalysis.tempoDifference)
+
+      : null);
 
 
 
-  const level = normalizeLevel(parsed.level, fallbackAcc, fallbackDev);
+  const performanceLevel = normalizeLevel(
+
+    parsed.performanceLevel || parsed.level,
+
+    fallbackAcc,
+
+    fallbackDev,
+
+  );
+
+  const level = performanceLevel;
 
   const overview = sanitizeDisplayText(
 
@@ -528,19 +587,17 @@ function normalizeAdviceObject(parsed, context) {
 
   ).slice(0, 5);
 
+  const weaknesses = sanitizeStringList(parsed.weaknesses ?? parsed.diem_yeu ?? parsed.han_che).slice(
+
+    0,
+
+    5,
+
+  );
 
 
-  const rawProblems =
 
-    parsed.mainProblems ??
-
-    parsed.problems ??
-
-    parsed.weaknesses ??
-
-    parsed.improvements ??
-
-    [];
+  const rawProblems = parsed.mainProblems ?? parsed.problems ?? parsed.improvements ?? [];
 
   let mainProblems = [];
 
@@ -565,6 +622,16 @@ function normalizeAdviceObject(parsed, context) {
       .filter(Boolean)
 
       .slice(0, 3);
+
+  }
+
+  if (mainProblems.length === 0 && weaknesses.length > 0) {
+
+    mainProblems = weaknesses
+
+      .slice(0, 3)
+
+      .map((w) => ({ problem: w, cause: '', impact: '', solution: '' }));
 
   }
 
@@ -596,7 +663,7 @@ function normalizeAdviceObject(parsed, context) {
 
           return exercise
 
-            ? { title: 'Bài tập', reason: '', exercise, durationMinutes: 10 }
+            ? { title: 'Bài tập', reason: '', goal: '', exercise, durationMinutes: 10 }
 
             : null;
 
@@ -614,7 +681,13 @@ function normalizeAdviceObject(parsed, context) {
 
 
 
-  const nextGoal = sanitizeDisplayText(parsed.nextGoal || parsed.muc_tieu || parsed.goal || '');
+  const nextSessionGoal = sanitizeDisplayText(
+
+    parsed.nextSessionGoal || parsed.nextGoal || parsed.muc_tieu || parsed.goal || '',
+
+  );
+
+  const nextGoal = nextSessionGoal;
 
   const encouragement = sanitizeDisplayText(
 
@@ -623,6 +696,64 @@ function normalizeAdviceObject(parsed, context) {
   );
 
 
+
+  let recommendedTempo = Number(parsed.recommendedTempo ?? parsed.tempoKhuyenNghi);
+
+  if (!Number.isFinite(recommendedTempo) || recommendedTempo <= 0) {
+
+    const refBpm = context?.tempoAnalysis?.expectedBPM ?? context?.tempo?.referenceBpm;
+
+    const dev = context?.tempoAnalysis?.tempoDifference;
+
+    if (refBpm && dev != null && dev < -3) {
+
+      recommendedTempo = Math.max(60, Math.round(refBpm * 0.85));
+
+    } else if (refBpm) {
+
+      recommendedTempo = Math.round(refBpm);
+
+    } else {
+
+      recommendedTempo = 0;
+
+    }
+
+  }
+
+
+
+  const rawSectionFeedback = parsed.sectionFeedback ?? parsed.section_feedback ?? [];
+
+  let sectionFeedback = [];
+
+  if (Array.isArray(rawSectionFeedback)) {
+
+    sectionFeedback = rawSectionFeedback
+
+      .map((item) => {
+
+        if (typeof item === 'string') return { section: '', feedback: sanitizeDisplayText(item) };
+
+        return sanitizeSectionFeedbackItem(item);
+
+      })
+
+      .filter(Boolean)
+
+      .slice(0, 6);
+
+  }
+
+
+
+  const skillAssessment = sanitizeSkillAssessment(
+
+    parsed.skillAssessment ?? parsed.skillScores,
+
+    context,
+
+  );
 
   const songAssessment = sanitizeSongAssessment(
 
@@ -644,11 +775,13 @@ function normalizeAdviceObject(parsed, context) {
 
     practicePlan.length ||
 
-    nextGoal ||
+    nextSessionGoal ||
 
     encouragement ||
 
-    songAssessment?.summary;
+    songAssessment?.summary ||
+
+    weaknesses.length;
 
 
 
@@ -660,9 +793,13 @@ function normalizeAdviceObject(parsed, context) {
 
     level,
 
+    performanceLevel,
+
     overview,
 
     strengths,
+
+    weaknesses,
 
     mainProblems,
 
@@ -672,7 +809,15 @@ function normalizeAdviceObject(parsed, context) {
 
     nextGoal,
 
+    nextSessionGoal,
+
     encouragement,
+
+    recommendedTempo,
+
+    sectionFeedback,
+
+    skillAssessment,
 
     songAssessment,
 
@@ -940,6 +1085,24 @@ function mergeAdvice(context, aiPart, meta) {
 
       songAssessment,
 
+      skillScores: context?.skillScores,
+
+      practiceMetrics: {
+
+        chordAccuracy: context?.comparison?.chordAccuracy,
+
+        wrongChords: context?.wrongChords,
+
+        transitionAnalysis: context?.transitionAnalysis,
+
+        tempoAnalysis: context?.tempoAnalysis,
+
+        sections: context?.sections,
+
+        skillScores: context?.skillScores,
+
+      },
+
     };
 
   }
@@ -966,6 +1129,20 @@ function mergeAdvice(context, aiPart, meta) {
 
 
 
+  const weaknesses = mergeUniqueLists(aiPart.weaknesses, local.weaknesses).slice(0, 5);
+
+  const sectionFeedback =
+
+    (aiPart.sectionFeedback?.length ? aiPart.sectionFeedback : local.sectionFeedback) || [];
+
+  const skillAssessment = aiPart.skillAssessment || local.skillAssessment || context?.skillScores;
+
+  const recommendedTempo =
+
+    aiPart.recommendedTempo || local.recommendedTempo || context?.tempoAnalysis?.expectedBPM || 0;
+
+
+
   return {
 
     available: true,
@@ -978,9 +1155,13 @@ function mergeAdvice(context, aiPart, meta) {
 
     level,
 
+    performanceLevel: aiPart.performanceLevel || level,
+
     overview,
 
     strengths,
+
+    weaknesses,
 
     mainProblems,
 
@@ -988,11 +1169,157 @@ function mergeAdvice(context, aiPart, meta) {
 
     practicePlan,
 
-    nextGoal: sanitizeDisplayText(aiPart.nextGoal || local.nextGoal),
+    nextGoal: sanitizeDisplayText(aiPart.nextGoal || aiPart.nextSessionGoal || local.nextGoal),
+
+    nextSessionGoal: sanitizeDisplayText(
+
+      aiPart.nextSessionGoal || aiPart.nextGoal || local.nextSessionGoal || local.nextGoal,
+
+    ),
 
     encouragement: sanitizeDisplayText(aiPart.encouragement || local.encouragement),
 
+    recommendedTempo,
+
+    sectionFeedback,
+
+    skillAssessment,
+
     songAssessment,
+
+    skillScores: context?.skillScores,
+
+    practiceMetrics: {
+
+      chordAccuracy: context?.comparison?.chordAccuracy,
+
+      wrongChords: context?.wrongChords,
+
+      transitionAnalysis: context?.transitionAnalysis,
+
+      tempoAnalysis: context?.tempoAnalysis,
+
+      sections: context?.sections,
+
+      skillScores: context?.skillScores,
+
+    },
+
+  };
+
+}
+
+
+
+function isQuotaExceededError(errMsg, status) {
+
+  const m = String(errMsg || '');
+
+  return (
+
+    status === 429 ||
+
+    /quota|exceeded|rate.?limit|resource.?exhausted|too many requests|insufficient.*quota/i.test(m)
+
+  );
+
+}
+
+
+
+function buildAdviceErrorResponse(meta = {}, message, { quotaExceeded = false } = {}) {
+
+  return {
+
+    available: false,
+
+    quotaExceeded,
+
+    source: 'none',
+
+    provider: meta.provider || null,
+
+    model: meta.model || null,
+
+    message: message || 'Không thể tạo gợi ý luyện tập. Vui lòng thử lại sau.',
+
+  };
+
+}
+
+
+
+function buildQuotaExceededResponse(meta = {}) {
+
+  return buildAdviceErrorResponse(
+
+    meta,
+
+    'Dịch vụ gợi ý AI đã hết hạn mức. Vui lòng thử lại sau hoặc liên hệ quản trị viên.',
+
+    { quotaExceeded: true },
+
+  );
+
+}
+
+
+
+function shouldUseLocalFallback() {
+
+  const v = String(process.env.PRACTICE_ADVICE_LOCAL_FALLBACK ?? 'true').toLowerCase();
+
+  return v !== 'false' && v !== '0' && v !== 'no';
+
+}
+
+
+
+function buildLocalFallbackResponse(context, meta = {}, warning = '') {
+
+  const local = buildLocalPracticeAdvice(context);
+
+  const songAssessment = mergeSongAssessment(null, context, local);
+
+
+
+  return {
+
+    available: true,
+
+    source: 'local',
+
+    provider: meta.provider || 'analysis',
+
+    model: 'rule-based',
+
+    aiWarning:
+
+      warning ||
+
+      'Không kết nối được AI — hiển thị gợi ý từ phân tích buổi luyện (rule-based).',
+
+    ...local,
+
+    songAssessment,
+
+    skillScores: context?.skillScores,
+
+    practiceMetrics: {
+
+      chordAccuracy: context?.comparison?.chordAccuracy,
+
+      wrongChords: context?.wrongChords,
+
+      transitionAnalysis: context?.transitionAnalysis,
+
+      tempoAnalysis: context?.tempoAnalysis,
+
+      sections: context?.sections,
+
+      skillScores: context?.skillScores,
+
+    },
 
   };
 
@@ -1004,31 +1331,43 @@ function formatApiError(errMsg, status) {
 
   const m = String(errMsg || '');
 
-  if (/openai_error|bad_response_status_code/i.test(m) && status === 429) {
+  if (isQuotaExceededError(m, status)) {
 
-    return 'Dịch vụ AI tạm quá tải — vẫn có đánh giá từ buổi luyện của bạn bên dưới.';
+    return 'Dịch vụ gợi ý AI đã hết hạn mức. Vui lòng thử lại sau.';
 
   }
 
-  if (/quota|exceeded|insufficient|无权访问/i.test(m) || status === 429) {
+  if (/openai_error|bad_response_status_code/i.test(m) && status === 429) {
 
-    return 'API AI hết hạn mức — vẫn hiển thị đánh giá từ buổi luyện.';
+    return 'Dịch vụ AI tạm quá tải. Vui lòng thử lại sau.';
+
+  }
+
+  if (/denied access|project has been denied/i.test(m)) {
+
+    return 'Tài khoản DeepSeek bị từ chối truy cập. Kiểm tra số dư và trạng thái tại platform.deepseek.com, tạo API key mới, hoặc đổi sang Gemini (PRACTICE_ADVICE_PROVIDER=gemini).';
 
   }
 
   if (/无权访问|not authorized|does not have access/i.test(m)) {
 
-    return 'Model không được phép — đổi GEMINI_PRACTICE_ADVICE_MODEL (vd. gemini-2.5-flash).';
+    return 'Model AI không được phép — kiểm tra cấu hình model AI (DEEPSEEK_PRACTICE_ADVICE_MODEL / GEMINI_PRACTICE_ADVICE_MODEL).';
 
   }
 
-  if (/invalid.*key|authentication|401|403/i.test(m)) {
+  if (/invalid.*key|authentication fails|incorrect api key/i.test(m) || status === 401) {
 
-    return 'API key không hợp lệ — vẫn hiển thị đánh giá từ buổi luyện.';
+    return 'API key không hợp lệ hoặc đã hết hạn. Tạo key mới tại platform.deepseek.com.';
 
   }
 
-  return `AI: ${m || `HTTP ${status}`} — vẫn có đánh giá từ buổi luyện bên dưới.`;
+  if (/insufficient balance|余额不足/i.test(m) || status === 402) {
+
+    return 'Tài khoản DeepSeek hết số dư. Nạp thêm tại platform.deepseek.com hoặc đổi sang provider khác.';
+
+  }
+
+  return `Không thể tạo gợi ý AI: ${m || `HTTP ${status}`}. Vui lòng thử lại sau.`;
 
 }
 
@@ -1036,33 +1375,44 @@ function formatApiError(errMsg, status) {
 
 function buildUserPrompt(context) {
 
-  return `Hãy đánh giá buổi luyện tập guitar này như một giáo viên guitar thực tế.
+  const aiPayload = {
+
+    referenceSong: context.referenceSong || context.song,
+
+    comparison: context.comparison,
+
+    tempoAnalysis: context.tempoAnalysis,
+
+    transitionAnalysis: context.transitionAnalysis,
+
+    wrongChords: context.wrongChords,
+
+    sections: context.sections,
+
+    skillScores: context.skillScores,
+
+    songValidation: context.songValidation,
+
+    skillLevel: context.skillLevel,
+
+  };
 
 
+
+  return `Đánh giá buổi luyện tập guitar dựa trên dữ liệu phân tích sau.
 
 Yêu cầu:
+- performanceLevel khớp skillLevel.
+- Tối đa 3 mainProblems, mỗi mục có problem/cause/impact/solution cụ thể.
+- practicePlan: exercise + durationMinutes + goal.
+- sectionFeedback: nhận xét từng đoạn trong sections (nếu có).
+- recommendedTempo: BPM đề xuất cho buổi kế tiếp.
+- skillAssessment: phản ánh skillScores, có thể điều chỉnh nhẹ nếu có lý do từ dữ liệu.
+- Nếu thiếu dữ liệu, ghi rõ trong overview — không suy đoán.
 
-- Xác định trình độ hiện tại (level phải khớp skillLevel trong dữ liệu).
+Dữ liệu phân tích:
 
-- Nêu tối đa 3 lỗi quan trọng nhất.
-
-- Giải thích lỗi bằng ngôn ngữ dễ hiểu.
-
-- Không chỉ nói số liệu — chuyển số liệu thành nhận xét thực tế.
-
-- Đưa bài tập cụ thể để sửa lỗi.
-
-- Đề xuất mục tiêu cho lần luyện tập tiếp theo.
-
-- Luôn bắt đầu bằng điểm mạnh.
-
-- Giọng điệu khích lệ, không chê trách.
-
-
-
-Dữ liệu buổi luyện:
-
-${JSON.stringify(context, null, 2)}`;
+${JSON.stringify(aiPayload, null, 2)}`;
 
 }
 
@@ -1094,13 +1444,7 @@ function extractGeminiText(data) {
 
 
 
-async function callOpenAiCompatible(context) {
-
-  const apiKey = getOpenAiApiKey();
-
-  const baseUrl = getOpenAiBaseUrl();
-
-  const model = getOpenAiModel();
+async function callOpenAiCompatible(context, { apiKey, baseUrl, model }) {
 
   const url = `${baseUrl}/chat/completions`;
 
@@ -1122,9 +1466,11 @@ async function callOpenAiCompatible(context) {
 
       model,
 
-      temperature: 0.5,
+      temperature: 0.3,
 
-      max_tokens: 1800,
+      max_tokens: 2200,
+
+      response_format: { type: 'json_object' },
 
       messages: [
 
@@ -1148,17 +1494,31 @@ async function callOpenAiCompatible(context) {
 
 
 
-async function generateWithOpenAiCompatible(context) {
+function handleLlmFailure(context, meta, message, { quotaExceeded = false } = {}) {
 
-  const apiKey = getOpenAiApiKey();
+  if (shouldUseLocalFallback()) {
 
-  const baseUrl = getOpenAiBaseUrl();
+    return buildLocalFallbackResponse(context, meta, message);
+
+  }
+
+  return buildAdviceErrorResponse(meta, message, { quotaExceeded });
+
+}
 
 
+
+async function generateWithLlmProvider(
+
+  context,
+
+  { apiKey, baseUrl, model, provider, logTag, missingKeyMessage, invalidResponseMessage },
+
+) {
 
   if (!apiKey || !baseUrl) {
 
-    return mergeAdvice(context, null, { provider: 'analysis' });
+    return handleLlmFailure(context, { provider }, missingKeyMessage);
 
   }
 
@@ -1166,7 +1526,15 @@ async function generateWithOpenAiCompatible(context) {
 
   try {
 
-    const { res, data, model } = await callOpenAiCompatible(context);
+    const { res, data, model: usedModel } = await callOpenAiCompatible(context, {
+
+      apiKey,
+
+      baseUrl,
+
+      model,
+
+    });
 
 
 
@@ -1174,13 +1542,33 @@ async function generateWithOpenAiCompatible(context) {
 
       const errMsg = data?.error?.message || `HTTP ${res.status}`;
 
-      console.warn('[practiceAdvice/openai]', errMsg);
+      console.warn(`[practiceAdvice/${logTag}]`, errMsg);
 
-      const merged = mergeAdvice(context, null, { provider: 'openai-compatible' });
+      if (isQuotaExceededError(errMsg, res.status)) {
 
-      merged.aiWarning = formatApiError(errMsg, res.status);
+        return handleLlmFailure(
 
-      return merged;
+          context,
+
+          { provider, model: usedModel },
+
+          'Dịch vụ gợi ý AI đã hết hạn mức. Vui lòng thử lại sau hoặc liên hệ quản trị viên.',
+
+          { quotaExceeded: true },
+
+        );
+
+      }
+
+      return handleLlmFailure(
+
+        context,
+
+        { provider, model: usedModel },
+
+        formatApiError(errMsg, res.status),
+
+      );
 
     }
 
@@ -1192,41 +1580,87 @@ async function generateWithOpenAiCompatible(context) {
 
     if (!parsed) {
 
-      console.warn('[practiceAdvice/openai] parse fail, raw:', raw.slice(0, 300));
+      console.warn(`[practiceAdvice/${logTag}] parse fail, raw:`, raw.slice(0, 300));
 
-      const merged = mergeAdvice(context, null, { provider: 'openai-compatible' });
+      return handleLlmFailure(
 
-      merged.aiWarning =
+        context,
 
-        'AI không trả JSON chuẩn — hiển thị đánh giá từ buổi luyện của bạn.';
+        { provider, model: usedModel },
 
-      return merged;
+        invalidResponseMessage,
+
+      );
 
     }
 
 
 
-    return mergeAdvice(context, parsed, {
-
-      source: 'ai',
-
-      provider: 'openai-compatible',
-
-      model,
-
-    });
+    return mergeAdvice(context, parsed, { source: 'ai', provider, model: usedModel });
 
   } catch (err) {
 
-    console.warn('[practiceAdvice/openai]', err?.message);
+    console.warn(`[practiceAdvice/${logTag}]`, err?.message);
 
-    const merged = mergeAdvice(context, null, { provider: 'openai-compatible' });
+    return handleLlmFailure(
 
-    merged.aiWarning = `Lỗi kết nối AI: ${err.message}`;
+      context,
 
-    return merged;
+      { provider, model },
+
+      `Lỗi kết nối AI: ${err.message}`,
+
+    );
 
   }
+
+}
+
+
+
+async function generateWithDeepSeek(context) {
+
+  return generateWithLlmProvider(context, {
+
+    apiKey: getDeepSeekApiKey(),
+
+    baseUrl: getDeepSeekBaseUrl(),
+
+    model: getDeepSeekModel(),
+
+    provider: 'deepseek',
+
+    logTag: 'deepseek',
+
+    missingKeyMessage: 'Chưa cấu hình DEEPSEEK_API_KEY cho gợi ý luyện tập.',
+
+    invalidResponseMessage: 'DeepSeek không trả dữ liệu hợp lệ. Vui lòng thử lại sau.',
+
+  });
+
+}
+
+
+
+async function generateWithOpenAiCompatible(context) {
+
+  return generateWithLlmProvider(context, {
+
+    apiKey: getOpenAiApiKey(),
+
+    baseUrl: getOpenAiBaseUrl(),
+
+    model: getOpenAiModel(),
+
+    provider: 'openai-compatible',
+
+    logTag: 'openai',
+
+    missingKeyMessage: 'Chưa cấu hình API gợi ý luyện tập (LLM_API_KEY / LLM_API_BASE_URL).',
+
+    invalidResponseMessage: 'AI không trả dữ liệu hợp lệ. Vui lòng thử lại sau.',
+
+  });
 
 }
 
@@ -1238,7 +1672,15 @@ async function generateWithGemini(context) {
 
   if (!apiKey) {
 
-    return mergeAdvice(context, null, { provider: 'analysis' });
+    return handleLlmFailure(
+
+      context,
+
+      { provider: 'gemini' },
+
+      'Chưa cấu hình GEMINI_API_KEY cho gợi ý luyện tập.',
+
+    );
 
   }
 
@@ -1266,7 +1708,7 @@ async function generateWithGemini(context) {
 
         generationConfig: {
 
-          temperature: 0.5,
+          temperature: 0.3,
 
           maxOutputTokens: 8192,
 
@@ -1290,11 +1732,31 @@ async function generateWithGemini(context) {
 
       console.warn('[practiceAdvice/gemini]', errMsg);
 
-      const merged = mergeAdvice(context, null, { provider: 'gemini' });
+      if (isQuotaExceededError(errMsg, res.status)) {
 
-      merged.aiWarning = formatApiError(errMsg, res.status);
+        return handleLlmFailure(
 
-      return merged;
+          context,
+
+          { provider: 'gemini', model },
+
+          'Dịch vụ gợi ý AI đã hết hạn mức. Vui lòng thử lại sau hoặc liên hệ quản trị viên.',
+
+          { quotaExceeded: true },
+
+        );
+
+      }
+
+      return handleLlmFailure(
+
+        context,
+
+        { provider: 'gemini', model },
+
+        formatApiError(errMsg, res.status),
+
+      );
 
     }
 
@@ -1306,11 +1768,15 @@ async function generateWithGemini(context) {
 
     if (!parsed) {
 
-      const merged = mergeAdvice(context, null, { provider: 'gemini' });
+      return handleLlmFailure(
 
-      merged.aiWarning = 'Gemini không trả JSON chuẩn — dùng đánh giá từ buổi luyện.';
+        context,
 
-      return merged;
+        { provider: 'gemini', model },
+
+        'Gemini không trả dữ liệu hợp lệ. Vui lòng thử lại sau.',
+
+      );
 
     }
 
@@ -1320,11 +1786,15 @@ async function generateWithGemini(context) {
 
   } catch (err) {
 
-    const merged = mergeAdvice(context, null, { provider: 'gemini' });
+    return handleLlmFailure(
 
-    merged.aiWarning = `Lỗi Gemini: ${err.message}`;
+      context,
 
-    return merged;
+      { provider: 'gemini', model: getGeminiModel() },
+
+      `Lỗi Gemini: ${err.message}`,
+
+    );
 
   }
 
@@ -1352,6 +1822,12 @@ export async function generatePracticeAdvice(payload) {
 
   }
 
+  if (provider === 'deepseek') {
+
+    return generateWithDeepSeek(context);
+
+  }
+
   return generateWithOpenAiCompatible(context);
 
 }
@@ -1368,13 +1844,35 @@ export function getPracticeAdviceConfigStatus() {
 
     openaiConfigured: Boolean(getOpenAiApiKey() && getOpenAiBaseUrl()),
 
+    deepseekConfigured: Boolean(getDeepSeekApiKey()),
+
     geminiConfigured: Boolean(getGeminiApiKey()),
 
-    model: provider === 'gemini' ? getGeminiModel() : getOpenAiModel(),
+    model:
 
-    baseUrl: provider === 'openai' ? getOpenAiBaseUrl() : null,
+      provider === 'gemini'
 
-    localFallback: true,
+        ? getGeminiModel()
+
+        : provider === 'deepseek'
+
+          ? getDeepSeekModel()
+
+          : getOpenAiModel(),
+
+    baseUrl:
+
+      provider === 'openai'
+
+        ? getOpenAiBaseUrl()
+
+        : provider === 'deepseek'
+
+          ? getDeepSeekBaseUrl()
+
+          : null,
+
+    localFallback: shouldUseLocalFallback(),
 
   };
 

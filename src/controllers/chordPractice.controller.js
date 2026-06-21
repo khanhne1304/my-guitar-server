@@ -17,6 +17,7 @@ import {
   transposeChordSequence,
 } from '../utils/chordCompare.js';
 import { generatePracticeAdvice } from '../services/practiceAdvice.service.js';
+import { buildPracticeMetrics } from '../services/practiceMetrics.service.js';
 
 function formatTransposeNote(semitones) {
   const n = Number(semitones);
@@ -95,6 +96,45 @@ export async function analyzeAndCompare(req, res, next) {
     });
     const { comparison, transposeSemitones, predictedAligned, usedCapo } = aligned;
 
+    const comparisonPayload = {
+      ...comparison,
+      accuracyPercent: Math.round(comparison.accuracy * 100),
+      predictedSequence: collapseConsecutive(predictedAligned),
+      predictedSequenceRaw: collapseConsecutive(predictedSeq),
+      referenceSequence: collapseConsecutive(referenceSeqForCompare),
+      referenceSequenceOriginal: collapseConsecutive(referenceSeqBase),
+      analyzedTranspose: uiTranspose,
+      transposeSemitones,
+      hopamCapo: usedCapo,
+      compareNote:
+        transposeSemitones !== 0
+          ? usedCapo > 0
+            ? `Đã dịch ${formatTransposeNote(transposeSemitones)} so với bản gốc (capo ${usedCapo})`
+            : `Đã dịch ${formatTransposeNote(transposeSemitones)} so với bản gốc`
+          : null,
+    };
+
+    const beatPayload = beatAnalysis?.error
+      ? { success: false, error: beatAnalysis.error }
+      : {
+          success: true,
+          bpm: beatAnalysis.bpm,
+          beatCount: beatAnalysis.beats?.length ?? 0,
+          beats: beatAnalysis.beats || [],
+          model: beatAnalysis.model_used,
+        };
+
+    const practiceMetrics = buildPracticeMetrics({
+      comparison: comparisonPayload,
+      tempoComparison,
+      chordRecognition,
+      beatAnalysis: beatPayload,
+      referenceSequence: comparisonPayload.referenceSequence,
+      predictedSequence: comparisonPayload.predictedSequence,
+      predictedSegmentsRaw: chordRecognition?.predicted_chords,
+      transposeSemitones,
+    });
+
     return res.json({
       success: true,
       data: {
@@ -116,31 +156,9 @@ export async function analyzeAndCompare(req, res, next) {
         },
         chordRecognition,
         tempoComparison,
-        beatAnalysis: beatAnalysis?.error
-          ? { success: false, error: beatAnalysis.error }
-          : {
-              success: true,
-              bpm: beatAnalysis.bpm,
-              beatCount: beatAnalysis.beats?.length ?? 0,
-              model: beatAnalysis.model_used,
-            },
-        comparison: {
-          ...comparison,
-          accuracyPercent: Math.round(comparison.accuracy * 100),
-          predictedSequence: collapseConsecutive(predictedAligned),
-          predictedSequenceRaw: collapseConsecutive(predictedSeq),
-          referenceSequence: collapseConsecutive(referenceSeqForCompare),
-          referenceSequenceOriginal: collapseConsecutive(referenceSeqBase),
-          analyzedTranspose: uiTranspose,
-          transposeSemitones,
-          hopamCapo: usedCapo,
-          compareNote:
-            transposeSemitones !== 0
-              ? usedCapo > 0
-                ? `Đã dịch ${formatTransposeNote(transposeSemitones)} so với bản gốc (capo ${usedCapo})`
-                : `Đã dịch ${formatTransposeNote(transposeSemitones)} so với bản gốc`
-              : null,
-        },
+        beatAnalysis: beatPayload,
+        comparison: comparisonPayload,
+        practiceMetrics,
       },
     });
   } catch (err) {
