@@ -132,19 +132,19 @@ export async function createOrderFromCartService(
       }
     }
 
-    // Nếu lấy từ cart server thì clear cart; nếu dùng providedItems thì không động vào cart
-    if (!Array.isArray(providedItems) || providedItems.length === 0) {
-      const cartQuery = Cart.findOne({ user: userId });
-      if (session) cartQuery.session(session);
-      const cart = await cartQuery;
-      
-      if (cart) {
-        cart.items = [];
-        if (session) {
-          await cart.save({ session });
-        } else {
-          await cart.save();
-        }
+    // Luôn xoá giỏ hàng trên server sau khi tạo đơn thành công.
+    // (Trước đây chỉ xoá khi lấy từ cart server, nên khi FE gửi kèm items
+    //  thì giỏ trên server vẫn còn -> sản phẩm "hiện lại" sau khi refresh.)
+    const cartQuery = Cart.findOne({ user: userId });
+    if (session) cartQuery.session(session);
+    const cart = await cartQuery;
+
+    if (cart && cart.items.length > 0) {
+      cart.items = [];
+      if (session) {
+        await cart.save({ session });
+      } else {
+        await cart.save();
       }
     }
 
