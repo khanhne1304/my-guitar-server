@@ -27,8 +27,17 @@ const orderSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ['cod'],
+      enum: ['cod', 'vnpay'],
       default: 'cod',
+    },
+    // Thông tin giao dịch VNPay (chỉ dùng khi paymentMethod = 'vnpay')
+    vnp: {
+      txnRef: { type: String, index: true }, // mã tham chiếu gửi sang VNPay (duy nhất)
+      transactionNo: String, // mã giao dịch tại VNPay
+      bankCode: String,
+      amount: Number, // số tiền (VND, chưa nhân 100)
+      payDate: String, // vnp_PayDate (yyyyMMddHHmmss)
+      responseCode: String, // vnp_ResponseCode ('00' = thành công)
     },
     status: {
       type: String,
