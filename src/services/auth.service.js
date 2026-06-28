@@ -109,8 +109,7 @@ export async function sendOTP(email) {
   // Gửi email OTP thực tế
   try {
     await sendOTPEmail(email, otp, 'reset');
-  } catch (error) {
-    console.error('Failed to send OTP email:', error);
+  } catch {
     throw new Error('Không thể gửi email OTP');
   }
 
@@ -227,36 +226,24 @@ export async function resetPasswordWithToken(token, newPassword) {
 
 // Gửi OTP cho đăng ký (kiểm tra email chưa tồn tại)
 export async function sendOTPForRegister(email) {
-  console.log('sendOTPForRegister - Email:', email);
-  
-  // Kiểm tra email đã tồn tại chưa
   const existingUser = await User.findOne({ email: email.toLowerCase() });
-  console.log('sendOTPForRegister - Existing user:', !!existingUser);
   
   if (existingUser) {
-    console.log('sendOTPForRegister - Email already exists');
     throw new Error('EMAIL_ALREADY_EXISTS');
   }
 
-  // Tạo OTP
   const otp = generateOTP();
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 phút
-  console.log('sendOTPForRegister - Generated OTP:', otp);
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-  // Lưu OTP với prefix để phân biệt với OTP reset password
   otpStore.set(`register_${email.toLowerCase()}`, {
     otp,
     expiresAt,
     attempts: 0
   });
 
-  // Gửi email OTP
   try {
-    console.log('sendOTPForRegister - Sending email...');
     await sendOTPEmail(email, otp, 'register');
-    console.log('sendOTPForRegister - Email sent successfully');
-  } catch (error) {
-    console.error('Failed to send register OTP email:', error);
+  } catch {
     throw new Error('Không thể gửi email OTP');
   }
 
@@ -267,9 +254,6 @@ export async function sendOTPForRegister(email) {
 
 // Xác thực OTP và hoàn thành đăng ký
 export async function verifyOTPAndRegister({ username, email, fullName, address, phone, password }, otp) {
-  console.log('verifyOTPAndRegister - Email:', email, 'OTP:', otp);
-  
-  // Validation dữ liệu đầu vào
   if (!username || !email || !password || !otp) {
     throw new Error('Missing required fields');
   }
@@ -290,36 +274,26 @@ export async function verifyOTPAndRegister({ username, email, fullName, address,
   const otpKey = `register_${email.toLowerCase()}`;
   const otpData = otpStore.get(otpKey);
   
-  console.log('verifyOTPAndRegister - OTP Key:', otpKey);
-  console.log('verifyOTPAndRegister - OTP Data exists:', !!otpData);
-  
   if (!otpData) {
-    console.log('verifyOTPAndRegister - OTP not found');
     throw new Error('OTP_NOT_FOUND');
   }
 
   if (new Date() > otpData.expiresAt) {
-    console.log('verifyOTPAndRegister - OTP expired');
     otpStore.delete(otpKey);
     throw new Error('OTP_EXPIRED');
   }
 
   if (otpData.attempts >= 3) {
-    console.log('verifyOTPAndRegister - Too many attempts');
     otpStore.delete(otpKey);
     throw new Error('OTP_TOO_MANY_ATTEMPTS');
   }
 
   if (otpData.otp !== otp) {
-    console.log('verifyOTPAndRegister - Invalid OTP');
     otpData.attempts++;
     otpStore.set(otpKey, otpData);
     throw new Error('OTP_INVALID');
   }
-
-  console.log('verifyOTPAndRegister - OTP verified successfully');
   
-  // Xóa OTP sau khi xác thực thành công
   otpStore.delete(otpKey);
 
   // Kiểm tra lại email và username chưa tồn tại (trong trường hợp có race condition)
@@ -327,19 +301,15 @@ export async function verifyOTPAndRegister({ username, email, fullName, address,
   const existingUserByUsername = await User.findOne({ username });
   
   if (existingUserByEmail) {
-    console.log('verifyOTPAndRegister - Email already exists during verification');
     throw new Error('EMAIL_ALREADY_EXISTS');
   }
   
   if (existingUserByUsername) {
-    console.log('verifyOTPAndRegister - Username already exists during verification');
     const error = new Error('DUPLICATE_FIELDS');
     error.conflicts = ['username'];
     throw error;
   }
 
-  // Tạo user mới
-  console.log('verifyOTPAndRegister - Creating user...');
   try {
     const user = await User.create({
       username,
@@ -350,26 +320,18 @@ export async function verifyOTPAndRegister({ username, email, fullName, address,
       password, // hash trong pre('save')
     });
 
-    console.log('Created user:', user);
-
     const token = signToken(user);
-    console.log('Generated token:', token ? 'OK' : 'FAILED');
     
     return { user, token };
   } catch (createError) {
-    console.error('Error creating user:', createError);
-    
-    // Kiểm tra lỗi duplicate
     if (createError.code === 11000) {
       const field = Object.keys(createError.keyPattern || {})[0] || 'field';
-      console.log('Duplicate field:', field);
       
       const error = new Error('DUPLICATE_FIELDS');
       error.conflicts = [field];
       throw error;
     }
     
-    // Re-throw lỗi khác
     throw createError;
   }
 }

@@ -1,36 +1,39 @@
 import nodemailer from 'nodemailer';
 
-// Development mode: Log OTP to console
-const isDevelopment = process.env.NODE_ENV === 'development';
-
-export async function sendOTPEmail(email, otp, type = 'reset') {
-  if (isDevelopment) {
-    // Development mode: Log OTP to console
-    const subject = type === 'register' ? 'Mã OTP xác thực đăng ký - My Guitar' : 'Mã OTP đặt lại mật khẩu - My Guitar';
-    console.log(`\n📧 OTP Email (Development Mode):`);
-    console.log(`To: ${email}`);
-    console.log(`Subject: ${subject}`);
-    console.log(`OTP Code: ${otp}`);
-    console.log(`Expires: 5 minutes\n`);
-    
-    // Simulate email sending delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    return true;
+function shouldUseConsoleOtp() {
+  if (process.env.OTP_CONSOLE_MODE === 'true') return true;
+  if (process.env.OTP_CONSOLE_MODE === 'false') return false;
+  if (process.env.NODE_ENV === 'production') {
+    return !process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD;
   }
+  // Mặc định local/staging: in OTP ra console (tránh treo SMTP khi dev)
+  return true;
+}
 
-  // Production mode: Send real email
-  const transporter = nodemailer.createTransport({
+function createMailTransporter() {
+  return nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 587,
     secure: false,
     auth: {
       user: process.env.GMAIL_USER,
-      pass: process.env.GMAIL_APP_PASSWORD
+      pass: process.env.GMAIL_APP_PASSWORD,
     },
     tls: {
-      rejectUnauthorized: false
-    }
+      rejectUnauthorized: false,
+    },
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 15_000,
   });
+}
+
+export async function sendOTPEmail(email, otp, type = 'reset') {
+  if (shouldUseConsoleOtp()) {
+    return true;
+  }
+
+  const transporter = createMailTransporter();
 
   const mailOptions = {
     from: process.env.GMAIL_USER,
@@ -41,40 +44,24 @@ export async function sendOTPEmail(email, otp, type = 'reset') {
 
   try {
     await transporter.sendMail(mailOptions);
-    console.log(`✅ OTP email sent successfully to ${email}`);
     return true;
   } catch (error) {
-    console.error('❌ Error sending OTP email:', error);
     throw new Error('Không thể gửi email OTP. Vui lòng thử lại sau.');
   }
 }
 
 // Test email connection
 export async function testEmailConnection() {
-  if (isDevelopment) {
-    console.log('📧 Email service running in development mode (console log)');
+  if (shouldUseConsoleOtp()) {
     return true;
   }
 
   try {
-    const transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 587,
-      secure: false,
-      auth: {
-        user: process.env.GMAIL_USER,
-        pass: process.env.GMAIL_APP_PASSWORD
-      },
-      tls: {
-        rejectUnauthorized: false
-      }
-    });
+    const transporter = createMailTransporter();
     
     await transporter.verify();
-    console.log('✅ Email server connection verified');
     return true;
-  } catch (error) {
-    console.error('❌ Email server connection failed:', error);
+  } catch {
     return false;
   }
 }

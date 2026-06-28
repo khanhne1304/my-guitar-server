@@ -205,22 +205,17 @@ export async function sendOTPForRegisterController(req, res, next) {
   try {
     const { email } = req.body;
     
-    console.log('sendOTPForRegisterController - Email:', email);
-    
     if (!email) {
-      console.log('Missing email');
       return res.status(400).json({ message: 'Email là bắt buộc' });
     }
 
     const result = await sendOTPForRegister(email);
-    console.log('sendOTPForRegisterController - Result:', result);
     
     res.json({ 
       message: 'OTP đã được gửi đến email của bạn', 
       expiresAt: result.expiresAt 
     });
   } catch (error) {
-    console.log('sendOTPForRegisterController - Error:', error.message);
     if (error.message === 'EMAIL_ALREADY_EXISTS') {
       return res.status(400).json({ message: 'Email này đã được sử dụng để đăng ký' });
     }
@@ -233,20 +228,11 @@ export async function verifyOTPAndRegisterController(req, res, next) {
   try {
     const { username, email, fullName, address, phone, password, otp } = req.body;
     
-    console.log('verifyOTPAndRegisterController - Data:', { 
-      username: !!username, 
-      email: !!email, 
-      password: !!password, 
-      otp: !!otp 
-    });
-    
     if (!username || !email || !password || !otp) {
-      console.log('Missing required fields');
       return res.status(400).json({ message: 'Tất cả các trường bắt buộc phải được điền' });
     }
 
     if (password.length < 6) {
-      console.log('Password too short');
       return res.status(400).json({ message: 'Mật khẩu phải có ít nhất 6 ký tự' });
     }
 
@@ -259,10 +245,7 @@ export async function verifyOTPAndRegisterController(req, res, next) {
       password
     }, otp);
 
-    console.log('Controller result:', result);
-
     if (!result || !result.user || !result.token) {
-      console.log('Missing data:', { result: !!result, user: !!result?.user, token: !!result?.token });
       return res.status(500).json({ message: 'Lỗi server khi tạo tài khoản' });
     }
 
@@ -280,9 +263,6 @@ export async function verifyOTPAndRegisterController(req, res, next) {
       }
     });
   } catch (error) {
-    console.log('verifyOTPAndRegisterController - Error:', error.message);
-    console.log('verifyOTPAndRegisterController - Error stack:', error.stack);
-    
     if (error.message === 'OTP_NOT_FOUND') {
       return res.status(400).json({ message: 'OTP không tồn tại hoặc đã hết hạn' });
     }
@@ -318,8 +298,6 @@ export async function verifyOTPAndRegisterController(req, res, next) {
       });
     }
     
-    // Log tất cả các lỗi khác
-    console.error('Unexpected error in verifyOTPAndRegisterController:', error);
     return res.status(500).json({ 
       message: 'Lỗi server không xác định', 
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
