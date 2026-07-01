@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import crypto from 'crypto';
 import { sendOTPEmail } from './emailService.js';
+import { assertUserNotLocked } from '../utils/accountLock.js';
 
 export function signToken(user) {
   try {
@@ -68,6 +69,8 @@ export async function loginUser(identifier, password) {
 
   const ok = await user.comparePassword(password);
   if (!ok) throw new Error('INVALID_CREDENTIALS');
+
+  assertUserNotLocked(user);
 
   const token = signToken(user);
   return { user, token };
@@ -380,6 +383,7 @@ export async function findOrCreateFacebookUser({ facebookId, email, fullName, av
       changed = true;
     }
     if (changed) await user.save();
+    assertUserNotLocked(user);
     return user;
   }
 
@@ -426,6 +430,7 @@ export async function findOrCreateGoogleUser({ googleId, email, fullName, avatar
       changed = true;
     }
     if (changed) await user.save();
+    assertUserNotLocked(user);
     return user;
   }
 

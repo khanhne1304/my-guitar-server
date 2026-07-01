@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
+import { buildAccountLockedMessage } from '../utils/accountLock.js';
 
 export async function protect(req, res, next) {
   try {
@@ -21,6 +22,13 @@ export async function protect(req, res, next) {
     const user = await User.findById(payload.id).select('-password');
     if (!user) {
       return res.status(401).json({ message: 'Unauthorized: User not found' });
+    }
+
+    if (user.isLocked) {
+      return res.status(403).json({
+        message: buildAccountLockedMessage(),
+        code: 'ACCOUNT_LOCKED',
+      });
     }
 
     req.user = user;

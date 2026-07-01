@@ -13,8 +13,12 @@ export async function notifyForumEvent({
   preview,
   answerId,
   replyId,
+  allowSelf = false,
 }) {
-  if (!recipientId || !actorId || String(recipientId) === String(actorId)) {
+  if (!recipientId || !actorId) {
+    return null;
+  }
+  if (!allowSelf && String(recipientId) === String(actorId)) {
     return null;
   }
 

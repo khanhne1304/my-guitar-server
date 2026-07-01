@@ -7,10 +7,10 @@ const forumUserNotificationSchema = new mongoose.Schema(
   {
     recipient: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     actor: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    /** Matches Socket event semantics: new_reply | new_like | reply_to_reply */
+    /** Matches Socket event semantics: new_reply | new_like | reply_to_reply | admin_reminder */
     eventType: {
       type: String,
-      enum: ['new_reply', 'new_like', 'reply_to_reply'],
+      enum: ['new_reply', 'new_like', 'reply_to_reply', 'admin_reminder'],
       required: true,
       index: true,
     },

@@ -4,6 +4,7 @@ import ForumReply from '../models/ForumReply.js';
 import ForumLike from '../models/ForumLike.js';
 import ForumAnswerLike from '../models/ForumAnswerLike.js';
 import ForumReport from '../models/ForumReport.js';
+import User from '../models/User.js';
 import mongoose from 'mongoose';
 import { uploadFileToCloudinary } from '../utils/cloudinary.js';
 import { notifyForumEvent } from '../services/forumRealtime.service.js';
@@ -806,8 +807,22 @@ export async function createReport(req, res, next) {
     if (!threadId) return res.status(400).json({ message: 'threadId is required' });
     if (!reason?.trim()) return res.status(400).json({ message: 'reason is required' });
 
-    const thread = await ForumThread.findById(threadId).select('_id').lean();
+    const thread = await ForumThread.findById(threadId).select('_id user title').lean();
     if (!thread) return res.status(404).json({ message: 'Thread not found' });
+
+    const reporterId = String(req.user?._id || req.user?.id || '');
+    const ownerId = String(thread.user || '');
+    if (ownerId && ownerId === reporterId) {
+      return res.status(400).json({ message: 'Bạn không thể báo cáo bài viết của chính mình' });
+    }
+
+    const existing = await ForumReport.findOne({
+      thread: threadId,
+      reportedBy: req.user.id,
+    }).select('_id').lean();
+    if (existing) {
+      return res.status(400).json({ message: 'Bạn đã báo cáo chủ đề này rồi' });
+    }
 
     const doc = await ForumReport.create({
       thread: threadId,
@@ -825,10 +840,85 @@ export async function listReports(req, res, next) {
   try {
     const items = await ForumReport.find({})
       .populate('reportedBy', 'username fullName avatarUrl')
-      .populate('thread', 'title category type user createdAt')
+      .populate({
+        path: 'thread',
+        select: 'title category type user createdAt',
+        populate: { path: 'user', select: 'username fullName email avatarUrl isLocked role' },
+      })
       .sort({ createdAt: -1 })
       .limit(500);
     res.json(items);
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function remindThreadAuthor(req, res, next) {
+  try {
+    const { threadId } = req.params;
+    const { message } = req.body || {};
+
+    const thread = await ForumThread.findById(threadId).select('_id user title').lean();
+    if (!thread) return res.status(404).json({ message: 'Thread not found' });
+
+    const authorId = thread.user;
+    if (!authorId) return res.status(400).json({ message: 'Không xác định được tác giả' });
+
+    const author = await User.findById(authorId).select('role isLocked username fullName').lean();
+    if (!author) return res.status(404).json({ message: 'Không tìm thấy tác giả' });
+    if (author.role === 'admin') {
+      return res.status(400).json({ message: 'Không thể nhắc nhở tài khoản quản trị viên' });
+    }
+
+    const preview =
+      String(message || '').trim() ||
+      `Chủ đề "${String(thread.title || '').slice(0, 120)}" của bạn đã bị báo cáo. Vui lòng kiểm tra và chỉnh sửa nội dung cho phù hợp quy định cộng đồng.`;
+
+    await notifyForumEvent({
+      recipientId: authorId,
+      actorId: req.user._id || req.user.id,
+      eventType: 'admin_reminder',
+      threadId: thread._id,
+      title: 'Nhắc nhở từ quản trị viên',
+      preview,
+    });
+
+    res.json({ ok: true, message: 'Đã gửi thông báo nhắc nhở' });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function lockThreadAuthor(req, res, next) {
+  try {
+    const { threadId } = req.params;
+
+    const thread = await ForumThread.findById(threadId).select('_id user title').lean();
+    if (!thread) return res.status(404).json({ message: 'Thread not found' });
+
+    const author = await User.findById(thread.user).select('role isLocked username fullName email');
+    if (!author) return res.status(404).json({ message: 'Không tìm thấy tác giả' });
+    if (author.role === 'admin') {
+      return res.status(400).json({ message: 'Không thể khóa tài khoản quản trị viên' });
+    }
+    if (String(author._id) === String(req.user._id || req.user.id)) {
+      return res.status(400).json({ message: 'Không thể khóa chính tài khoản của bạn' });
+    }
+
+    author.isLocked = true;
+    await author.save();
+
+    res.json({
+      ok: true,
+      message: 'Đã khóa tài khoản tác giả',
+      user: {
+        id: author._id,
+        username: author.username,
+        fullName: author.fullName,
+        email: author.email,
+        isLocked: author.isLocked,
+      },
+    });
   } catch (e) {
     next(e);
   }

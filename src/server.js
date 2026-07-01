@@ -101,6 +101,8 @@ import practiceRoutes from './routes/practice.routes.js';
 import challengeRoutes from './routes/challenge.routes.js';
 import dashboardRoutes from './routes/dashboard.routes.js';
 import messageRoutes from './routes/message.routes.js';
+import bannerRoutes from './routes/banner.routes.js';
+import adminBannerRoutes from './routes/adminBanner.routes.js';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
@@ -139,6 +141,8 @@ app.use('/api/practice-routines', practiceRoutes);
 app.use('/api/challenge-songs', challengeRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api/banners', bannerRoutes);
+app.use('/api/admin/banners', adminBannerRoutes);
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
 /** --------- ERRORS --------- **/

@@ -40,6 +40,8 @@ const userSchema = new mongoose.Schema(
 			enum: ['beginner', 'intermediate', 'pro'],
 			default: 'beginner',
 		},
+		/** Admin khóa tài khoản — không cho đăng nhập / dùng API */
+		isLocked: { type: Boolean, default: false, index: true },
 		blocked: {
 			type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
 			default: [],

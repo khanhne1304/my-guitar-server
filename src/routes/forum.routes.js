@@ -22,6 +22,8 @@ import {
   toggleAnswerLike,
   createReport,
   listReports,
+  remindThreadAuthor,
+  lockThreadAuthor,
 } from '../controllers/forum.controller.js';
 
 const router = Router();
@@ -53,6 +55,8 @@ router.post('/likes', protect, toggleLike);
 // Reports
 router.post('/reports', protect, createReport);
 router.get('/reports', protect, admin, listReports);
+router.post('/reports/thread/:threadId/remind', protect, admin, remindThreadAuthor);
+router.post('/reports/thread/:threadId/lock-author', protect, admin, lockThreadAuthor);
 
 export default router;
 

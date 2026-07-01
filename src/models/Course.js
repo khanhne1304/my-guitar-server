@@ -1,8 +1,10 @@
 import mongoose from 'mongoose';
+import slugify from 'slugify';
 
 const courseSchema = new mongoose.Schema(
   {
     title: { type: String, required: true, trim: true },
+    slug: { type: String, unique: true, index: true },
     description: { type: String, default: '', trim: true },
     thumbnail: { type: String, default: '', trim: true },
     level: {
@@ -16,5 +18,23 @@ const courseSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+courseSchema.pre('save', async function () {
+  if (!this.isModified('title') && this.slug) return;
+
+  const base =
+    slugify(this.title || '', { lower: true, strict: false, locale: 'vi' }) ||
+    `course-${this._id?.toString?.() || Date.now()}`;
+
+  let slug = base;
+  let suffix = 1;
+  const Model = this.constructor;
+
+  while (await Model.exists({ slug, _id: { $ne: this._id } })) {
+    slug = `${base}-${suffix++}`;
+  }
+
+  this.slug = slug;
+});
 
 export default mongoose.model('Course', courseSchema);

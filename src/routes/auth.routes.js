@@ -3,6 +3,7 @@ import { register, login, checkEmail, sendOTPToEmail, verifyOTPCode, resetPasswo
 import { validateRegister, validateLogin } from '../validators/auth.validator.js';
 import passport from 'passport';
 import { signToken } from '../services/auth.service.js';
+import { buildAccountLockedMessage } from '../utils/accountLock.js';
 
 const router = Router();
 
@@ -78,6 +79,11 @@ function makeOAuthCallback(strategy) {
 			if (err || !user) {
 				rejectCache?.(err || new Error('no user'));
 				return res.redirect(failureRedirect);
+			}
+			if (user.isLocked) {
+				rejectCache?.(new Error('ACCOUNT_LOCKED'));
+				const msg = encodeURIComponent(buildAccountLockedMessage());
+				return res.redirect(`${FRONTEND_URL}/login?error=locked&message=${msg}`);
 			}
 			try {
 				const url = buildAuthRedirect(req, user);

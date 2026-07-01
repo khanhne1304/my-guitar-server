@@ -34,6 +34,7 @@ export function mapCourseBase(c) {
   return {
     id: c._id.toString(),
     title: c.title,
+    slug: c.slug || '',
     description: c.description || '',
     thumbnail: c.thumbnail || '',
     level: c.level,

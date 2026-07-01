@@ -89,6 +89,13 @@ export async function login(req, res, next) {
     if (e.message === 'INVALID_CREDENTIALS') {
       return res.status(401).json({ message: 'Sai tài khoản hoặc mật khẩu' });
     }
+    if (e.message === 'ACCOUNT_LOCKED') {
+      return res.status(403).json({
+        message: `Tài khoản đã bị khóa. Hãy liên hệ "${e.contactEmail || 'admin@guitarmaster.vn'}" của quản trị viên.`,
+        code: 'ACCOUNT_LOCKED',
+        contactEmail: e.contactEmail,
+      });
+    }
     next(e);
   }
 }
@@ -218,6 +225,15 @@ export async function sendOTPForRegisterController(req, res, next) {
   } catch (error) {
     if (error.message === 'EMAIL_ALREADY_EXISTS') {
       return res.status(400).json({ message: 'Email này đã được sử dụng để đăng ký' });
+    }
+    if (
+      error.message === 'Không thể gửi email OTP' ||
+      error.message?.includes('email OTP') ||
+      error.message === 'Chưa cấu hình Gmail trên server'
+    ) {
+      return res.status(503).json({
+        message: error.message || 'Không thể gửi email OTP. Vui lòng thử lại sau.',
+      });
     }
     next(error);
   }

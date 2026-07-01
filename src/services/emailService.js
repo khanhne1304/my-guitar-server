@@ -1,31 +1,70 @@
 import nodemailer from 'nodemailer';
 
+function gmailAuth() {
+  const user = (process.env.GMAIL_USER || '').trim();
+  const pass = (process.env.GMAIL_APP_PASSWORD || '').trim();
+  if (!user || !pass) return null;
+  return { user, pass };
+}
+
 function shouldUseConsoleOtp() {
   if (process.env.OTP_CONSOLE_MODE === 'true') return true;
   if (process.env.OTP_CONSOLE_MODE === 'false') return false;
   if (process.env.NODE_ENV === 'production') {
-    return !process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD;
+    return !gmailAuth();
   }
-  // Mặc định local/staging: in OTP ra console (tránh treo SMTP khi dev)
   return true;
 }
 
-function createMailTransporter() {
+function smtpProfiles() {
+  const host = (process.env.SMTP_HOST || 'smtp.gmail.com').trim();
+  const preferredPort = Number(process.env.SMTP_PORT);
+  if (preferredPort) {
+    return [{ host, port: preferredPort, secure: preferredPort === 465 }];
+  }
+  // Render/cloud thường chặn 587 — thử 465 (SSL) trước
+  return [
+    { host, port: 465, secure: true },
+    { host, port: 587, secure: false },
+  ];
+}
+
+function createMailTransporter({ host, port, secure }) {
+  const auth = gmailAuth();
   return nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
-    auth: {
-      user: process.env.GMAIL_USER,
-      pass: process.env.GMAIL_APP_PASSWORD,
-    },
-    tls: {
-      rejectUnauthorized: false,
-    },
-    connectionTimeout: 10_000,
-    greetingTimeout: 10_000,
-    socketTimeout: 15_000,
+    host,
+    port,
+    secure,
+    auth,
+    tls: { rejectUnauthorized: false },
+    connectionTimeout: 15_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 20_000,
   });
+}
+
+async function sendMailViaSmtp(mailOptions) {
+  const auth = gmailAuth();
+  if (!auth) {
+    throw new Error('GMAIL_NOT_CONFIGURED');
+  }
+
+  let lastError;
+  for (const profile of smtpProfiles()) {
+    try {
+      const transporter = createMailTransporter(profile);
+      await transporter.sendMail(mailOptions);
+      return;
+    } catch (error) {
+      lastError = error;
+      console.error(
+        `[email] SMTP ${profile.host}:${profile.port} failed:`,
+        error?.message || error
+      );
+    }
+  }
+
+  throw lastError || new Error('SMTP send failed');
 }
 
 export async function sendOTPEmail(email, otp, type = 'reset') {
@@ -33,40 +72,49 @@ export async function sendOTPEmail(email, otp, type = 'reset') {
     return true;
   }
 
-  const transporter = createMailTransporter();
-
+  const auth = gmailAuth();
   const mailOptions = {
-    from: process.env.GMAIL_USER,
+    from: auth.user,
     to: email,
-    subject: type === 'register' ? 'Mã OTP xác thực đăng ký - My Guitar' : 'Xác thực đổi mật khẩu - Mã OTP từ My Guitar',
-    html: type === 'register' ? getRegisterOTPHTML(otp) : getResetPasswordOTPHTML(otp)
+    subject:
+      type === 'register'
+        ? 'Mã OTP xác thực đăng ký - My Guitar'
+        : 'Xác thực đổi mật khẩu - Mã OTP từ My Guitar',
+    html:
+      type === 'register'
+        ? getRegisterOTPHTML(otp)
+        : getResetPasswordOTPHTML(otp),
   };
 
   try {
-    await transporter.sendMail(mailOptions);
+    await sendMailViaSmtp(mailOptions);
     return true;
   } catch (error) {
+    if (error?.message === 'GMAIL_NOT_CONFIGURED') {
+      throw new Error('Chưa cấu hình Gmail trên server');
+    }
     throw new Error('Không thể gửi email OTP. Vui lòng thử lại sau.');
   }
 }
 
-// Test email connection
 export async function testEmailConnection() {
   if (shouldUseConsoleOtp()) {
     return true;
   }
 
   try {
-    const transporter = createMailTransporter();
-    
-    await transporter.verify();
-    return true;
+    const auth = gmailAuth();
+    for (const profile of smtpProfiles()) {
+      const transporter = createMailTransporter(profile);
+      await transporter.verify();
+      return true;
+    }
+    return false;
   } catch {
     return false;
   }
 }
 
-// HTML template cho email đăng ký
 function getRegisterOTPHTML(otp) {
   return `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -118,7 +166,6 @@ function getRegisterOTPHTML(otp) {
   `;
 }
 
-// HTML template cho email reset password
 function getResetPasswordOTPHTML(otp) {
   return `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
