@@ -1,8 +1,9 @@
 import { Router } from 'express';
-import { register, login, checkEmail, sendOTPToEmail, verifyOTPCode, resetPasswordWithOTP, resetPasswordWithTokenController, sendOTPForRegisterController, verifyOTPAndRegisterController } from '../controllers/auth.controller.js';
+import { register, login, checkEmail, sendOTPToEmail, verifyOTPCode, resetPasswordWithOTP, resetPasswordWithTokenController, sendOTPForRegisterController, verifyOTPAndRegisterController, exchangeOAuthCode } from '../controllers/auth.controller.js';
 import { validateRegister, validateLogin } from '../validators/auth.validator.js';
 import passport from 'passport';
 import { signToken } from '../services/auth.service.js';
+import { createOAuthSessionCode } from '../services/oauthExchange.service.js';
 import { buildAccountLockedMessage } from '../utils/accountLock.js';
 
 const router = Router();
@@ -18,6 +19,7 @@ router.post('/reset-password-token', resetPasswordWithTokenController);
 // Routes cho đăng ký với OTP
 router.post('/send-otp-register', sendOTPForRegisterController);
 router.post('/verify-otp-register', verifyOTPAndRegisterController);
+router.post('/oauth/exchange', exchangeOAuthCode);
 
 // ---- OAuth (Facebook & Google) ----
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
@@ -33,7 +35,7 @@ const OAUTH_CODE_TTL_MS = 60 * 1000;
 
 function buildAuthRedirect(req, user) {
 	const token = signToken(user);
-	const payload = {
+	const userPayload = {
 		id: user._id,
 		username: user.username,
 		email: user.email,
@@ -42,10 +44,10 @@ function buildAuthRedirect(req, user) {
 		phone: user.phone,
 		role: user.role,
 	};
-	const encodedUser = encodeURIComponent(Buffer.from(JSON.stringify(payload)).toString('base64'));
-	const encodedToken = encodeURIComponent(token);
-	const state = req.query?.state ? `&state=${encodeURIComponent(req.query.state)}` : '';
-	return `${FRONTEND_URL}/auth/callback?token=${encodedToken}&user=${encodedUser}${state}`;
+	const state = req.query?.state ? String(req.query.state) : '';
+	const sessionCode = createOAuthSessionCode({ token, user: userPayload, state });
+	const stateParam = state ? `&state=${encodeURIComponent(state)}` : '';
+	return `${FRONTEND_URL}/auth/callback?code=${encodeURIComponent(sessionCode)}${stateParam}`;
 }
 
 function makeOAuthCallback(strategy) {

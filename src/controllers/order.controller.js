@@ -21,7 +21,10 @@ export async function createOrderFromCart(req, res, next) {
       req.body.paymentMethod,
       req.body.items,
       req.body.couponCode || null,
-      req.body.shipFee || 0,
+      {
+        mode: req.body.shippingMode || 'delivery',
+        shipMethod: req.body.shipMethod || 'standard',
+      },
     );
 
     res.status(201).json(order);
