@@ -36,7 +36,7 @@ const OAUTH_CODE_TTL_MS = 60 * 1000;
 function buildAuthRedirect(req, user) {
 	const token = signToken(user);
 	const userPayload = {
-		id: user._id,
+		id: user._id?.toString?.() || String(user._id),
 		username: user.username,
 		email: user.email,
 		fullName: user.fullName,

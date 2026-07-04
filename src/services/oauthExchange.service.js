@@ -2,6 +2,8 @@ import crypto from 'crypto';
 
 /** Mã đổi session OAuth một lần — tránh đưa JWT vào URL redirect */
 const store = new Map();
+/** Cache kết quả đã đổi để request trùng (React Strict Mode) vẫn thành công */
+const redeemed = new Map();
 const TTL_MS = 2 * 60 * 1000;
 
 export function createOAuthSessionCode({ token, user, state = '' }) {
@@ -21,15 +23,28 @@ export function consumeOAuthSessionCode(code) {
     throw new Error('INVALID_CODE');
   }
 
-  const entry = store.get(code);
-  store.delete(code);
+  const cached = redeemed.get(code);
+  if (cached) {
+    if (Date.now() > cached.expiresAt) {
+      redeemed.delete(code);
+      throw new Error('CODE_EXPIRED');
+    }
+    return cached;
+  }
 
+  const entry = store.get(code);
   if (!entry) {
     throw new Error('INVALID_CODE');
   }
+
+  store.delete(code);
+
   if (Date.now() > entry.expiresAt) {
     throw new Error('CODE_EXPIRED');
   }
+
+  redeemed.set(code, entry);
+  setTimeout(() => redeemed.delete(code), TTL_MS);
 
   return entry;
 }
