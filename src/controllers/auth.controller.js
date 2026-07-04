@@ -1,5 +1,6 @@
 import { validationResult } from 'express-validator';
 import { registerUser, loginUser, checkEmailExists, sendOTP, verifyOTP, resetPassword, resetPasswordWithToken, sendOTPForRegister, verifyOTPAndRegister } from '../services/auth.service.js';
+import { consumeOAuthSessionCode } from '../services/oauthExchange.service.js';
 
 export async function register(req, res, next) {
   try {
@@ -318,5 +319,27 @@ export async function verifyOTPAndRegisterController(req, res, next) {
       message: 'Lỗi server không xác định', 
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
+  }
+}
+
+export async function exchangeOAuthCode(req, res, next) {
+  try {
+    const { code } = req.body || {};
+    if (!code) {
+      return res.status(400).json({ message: 'Thiếu mã xác thực' });
+    }
+
+    const session = consumeOAuthSessionCode(code);
+
+    res.json({
+      token: session.token,
+      user: session.user,
+      state: session.state || '',
+    });
+  } catch (error) {
+    if (error.message === 'INVALID_CODE' || error.message === 'CODE_EXPIRED') {
+      return res.status(400).json({ message: 'Mã đăng nhập không hợp lệ hoặc đã hết hạn' });
+    }
+    next(error);
   }
 }

@@ -10,10 +10,8 @@ export const validateCreateOrder = [
   // Cho phép client gửi items trực tiếp thay vì lấy từ cart trên server
   body('items').optional().isArray({ min: 1 }),
   body('items.*.product').optional().notEmpty(),
-  body('items.*.name').optional().isString(),
-  body('items.*.price').optional().isNumeric(),
   body('items.*.qty').optional().isInt({ min: 1 }),
-  body('total').optional().isNumeric(),
-  body('shipFee').optional().isNumeric(),
+  body('shippingMode').optional().isIn(['delivery', 'pickup']),
+  body('shipMethod').optional().isIn(['economy', 'standard', 'express']),
   body('paymentMethod').optional().isIn(['cod', 'vnpay']),
 ];

@@ -5,6 +5,7 @@ import Cart from '../models/Cart.js';
 import Coupon from '../models/Coupon.js';
 import { applyCoupon } from './coupon.service.js';
 import { executeWithTransaction } from '../utils/transactionHelper.js';
+import { calculateShippingFee } from '../utils/shippingHelper.js';
 
 export async function createOrderFromCartService(
   userId,
@@ -12,7 +13,7 @@ export async function createOrderFromCartService(
   paymentMethod,
   providedItems,
   couponCode = null,
-  shipFee = 0,
+  shippingOptions = {},
 ) {
   return await executeWithTransaction(async (session) => {
     // Nếu client cung cấp items hợp lệ, ưu tiên dùng chúng; nếu không thì dùng cart trên server
@@ -21,8 +22,6 @@ export async function createOrderFromCartService(
       sourceItems = providedItems.map((it) => ({
         product: it.product,
         qty: Number(it.qty) || 0,
-        name: it.name,
-        price: typeof it.price === 'number' ? it.price : undefined,
       }));
     } else {
       const cartQuery = Cart.findOne({ user: userId });
@@ -58,12 +57,8 @@ export async function createOrderFromCartService(
         throw new Error(`OUT_OF_STOCK:${p.name}`);
       }
 
-      const unit = (() => {
-        // Nếu client đã cung cấp price/name thì ưu tiên dùng giá trị FE gửi
-        if (it.price && typeof it.price === 'number') return it.price;
-        return p.price.sale ?? p.price.base;
-      })();
-      const name = it.name || p.name;
+      const unit = p.price.sale ?? p.price.base;
+      const name = p.name;
 
       subtotal += unit * it.qty;
       itemsData.push({ product: p._id, name, price: unit, qty: it.qty });
@@ -87,7 +82,12 @@ export async function createOrderFromCartService(
       }
     }
 
-    const shippingFee = Math.max(0, Number(shipFee) || 0);
+    const shippingFee = calculateShippingFee({
+      mode: shippingOptions.mode || 'delivery',
+      shipMethod: shippingOptions.shipMethod || 'standard',
+      shippingAddress,
+      subtotal,
+    });
     const total = Math.max(0, subtotal + shippingFee - discount);
 
     // Tạo đơn hàng
