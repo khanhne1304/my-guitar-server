@@ -8,7 +8,7 @@ import {
   remove,
   listByCategorySlug, // ✅ controller mới
 } from '../controllers/brand.controller.js';
-import { validateCreate } from '../validators/brand.validator.js';
+import { validateCreate, validateUpdate } from '../validators/brand.validator.js';
 
 const router = Router();
 
@@ -19,7 +19,7 @@ router.get('/', list);
 router.get('/:slug', getBySlug);
 
 router.post('/', protect, admin, validateCreate, create);
-router.patch('/:id', protect, admin, update);
+router.patch('/:id', protect, admin, validateUpdate, update);
 router.delete('/:id', protect, admin, remove);
 
 export default router;

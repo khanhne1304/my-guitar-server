@@ -1,10 +1,62 @@
 import Product from '../models/Product.js';
 import {
   getCategoryBySlug,
-  listBrandsByCategorySlug, // nếu cần reuse
 } from './category.service.js';
 import Brand from '../models/Brand.js';
 import mongoose from 'mongoose';
+
+function escapeRegex(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function buildCategoryMatchStage(categorySlug) {
+  const category = await getCategoryBySlug(categorySlug);
+  if (category) {
+    if (categorySlug === 'guitar') {
+      return {
+        $match: {
+          $or: [
+            { 'category._id': category._id },
+            { 'category.slug': categorySlug },
+            { 'attributes.type': 'guitar' },
+          ],
+        },
+      };
+    }
+    return { $match: { 'category._id': category._id } };
+  }
+  if (categorySlug === 'guitar') {
+    return { $match: { 'attributes.type': 'guitar' } };
+  }
+  return null;
+}
+
+async function buildBrandMatchStage(brandSlug) {
+  const brand = await Brand.findOne({ slug: brandSlug }).select('_id name');
+  const orConditions = [{ 'brand.slug': brandSlug }];
+
+  if (brand?._id) {
+    orConditions.push({ 'brand._id': brand._id });
+  }
+  if (brand?.name) {
+    orConditions.push({ name: new RegExp(escapeRegex(brand.name), 'i') });
+  } else {
+    orConditions.push({ name: new RegExp(escapeRegex(brandSlug), 'i') });
+  }
+
+  return { $match: { $or: orConditions } };
+}
+
+async function resolveBrandFromName(productName) {
+  if (!productName) return null;
+  const brands = await Brand.find().select('_id name').sort({ name: -1 });
+  for (const brand of brands) {
+    if (new RegExp(escapeRegex(brand.name), 'i').test(productName)) {
+      return brand._id;
+    }
+  }
+  return null;
+}
 
 /**
  * Lấy danh sách sản phẩm với filter nâng cao + search theo q
@@ -56,22 +108,14 @@ export async function listProductsService(query) {
 
   // Filter categorySlug
   if (categorySlug) {
-    const category = await getCategoryBySlug(categorySlug);
-    if (category) {
-      pipeline.push({ $match: { 'category._id': category._id } });
-    } else {
-      return []; // slug sai → trả mảng rỗng
-    }
+    const categoryStage = await buildCategoryMatchStage(categorySlug);
+    if (!categoryStage) return [];
+    pipeline.push(categoryStage);
   }
 
   // Filter brandSlug
   if (brandSlug) {
-    const brand = await Brand.findOne({ slug: brandSlug }).select('_id');
-    if (brand) {
-      pipeline.push({ $match: { 'brand._id': brand._id } });
-    } else {
-      return []; // slug sai → trả mảng rỗng
-    }
+    pipeline.push(await buildBrandMatchStage(brandSlug));
   }
 
   // Filter nâng cao (price, stock, ...)
@@ -135,6 +179,11 @@ export async function createProductService(data) {
     }
   }
 
+  if (!payload.brand && payload.name) {
+    const brandId = await resolveBrandFromName(payload.name);
+    if (brandId) payload.brand = brandId;
+  }
+
   return await Product.create(payload);
 }
 
@@ -165,6 +214,11 @@ export async function updateProductService(id, data) {
     }
   }
 
+  if (!payload.brand && payload.name) {
+    const brandId = await resolveBrandFromName(payload.name);
+    if (brandId) payload.brand = brandId;
+  }
+
   return await Product.findByIdAndUpdate(id, payload, { new: true });
 }
 
@@ -182,13 +236,9 @@ export async function listProductsByCategoryService(categorySlug) {
 }
 
 export async function listProductsByCategoryAndBrandService(categorySlug, brandSlug) {
-  const category = await getCategoryBySlug(categorySlug);
-  const brand = await Brand.findOne({ slug: brandSlug }).select('_id');
-
-  if (!category || !brand) return [];
-  return await Product.find({
-    category: category._id,
-    brand: brand._id,
-    isActive: true,
-  }).populate('brand category', 'name slug');
+  return listProductsService({
+    categorySlug,
+    brandSlug,
+    limit: 1000,
+  });
 }
