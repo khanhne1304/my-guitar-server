@@ -1,4 +1,4 @@
-import { answerQuestion, isIndexReady, buildProductIndex } from '../services/rag.service.js';
+import { answerQuestion, isIndexReady, buildProductIndex, clearHistory } from '../services/rag.service.js';
 
 function parseBudget(text) {
 	if (!text) return {};
@@ -114,6 +114,18 @@ export async function reindexProducts(_req, res, next) {
 	try {
 		const meta = await buildProductIndex();
 		res.json({ message: 'Reindexed', ...meta });
+	} catch (e) {
+		next(e);
+	}
+}
+
+export async function clearChatSession(req, res, next) {
+	try {
+		const { sessionId } = req.body || {};
+		if (typeof sessionId === 'string' && sessionId.trim()) {
+			clearHistory(sessionId.trim());
+		}
+		res.json({ ok: true });
 	} catch (e) {
 		next(e);
 	}

@@ -1,45 +1,56 @@
-// RAG service xây dựng theo kiến trúc LangChain (Retrieval-Augmented Generation)
-// - Embeddings: HuggingFace (Xenova/all-MiniLM-L6-v2) chạy local
-// - Vector store: FAISS
-// - LLM sinh câu trả lời: Google Gemini (ChatGoogleGenerativeAI)
-// - Bộ nhớ hội thoại: ConversationBuffer theo sessionId
-// - Chuỗi: history-aware retriever + stuff documents (ConversationalRetrievalChain)
-// Nguồn tri thức: sản phẩm trong MongoDB + tài liệu (.txt/.md) + thông tin công ty
+// RAG service theo kiến trúc LangChain (Retrieval-Augmented Generation)
+// 1. Indexing: tài liệu -> chunk -> embedding (HuggingFace) -> FAISS vector store
+// 2. Retrieval: similarity search theo câu hỏi (cosine)
+// 3. Generation: DeepSeek LLM + ngữ cảnh truy xuất + bộ nhớ hội thoại
+// Nguồn tri thức: sản phẩm, khóa học (MongoDB) + tài liệu (.txt/.md) + thông tin công ty
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 import Product from '../models/Product.js';
+import Course from '../models/Course.js';
 import { companyInfo } from '../data/companyInfo.js';
 
 import { HuggingFaceTransformersEmbeddings } from '@langchain/community/embeddings/hf_transformers';
 import { FaissStore } from '@langchain/community/vectorstores/faiss';
+import { ChatOpenAI } from '@langchain/openai';
 import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
 import { Document } from '@langchain/core/documents';
 import { ChatPromptTemplate, MessagesPlaceholder } from '@langchain/core/prompts';
 import { HumanMessage, AIMessage } from '@langchain/core/messages';
 import { createStuffDocumentsChain } from 'langchain/chains/combine_documents';
+import {
+	runStructuredProductQuery,
+	formatStructuredAnswer,
+} from './chatProductQuery.service.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const KNOWLEDGE_DIR = path.resolve(__dirname, '../data/knowledge');
 
 const EMBEDDING_MODEL = process.env.RAG_EMBEDDING_MODEL || 'Xenova/all-MiniLM-L6-v2';
-const CHAT_MODEL =
+const RAG_LLM_PROVIDER = String(process.env.RAG_LLM_PROVIDER || 'deepseek').toLowerCase();
+const DEEPSEEK_CHAT_MODEL =
+	process.env.RAG_CHAT_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+const GEMINI_CHAT_MODEL =
 	process.env.GEMINI_CHAT_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-const MAX_HISTORY_TURNS = 8; // số lượt hội thoại tối đa lưu lại cho mỗi phiên
-// Ngưỡng độ tương đồng (cosine). Dưới ngưỡng -> coi như không liên quan,
-// KHÔNG gợi ý sản phẩm (vd: gõ từ vô nghĩa, hỏi lạc đề).
+const MAX_HISTORY_TURNS = 8;
 const MIN_PRODUCT_SCORE = Number(process.env.RAG_MIN_SCORE ?? 0.35);
-// Ngưỡng để đưa tài liệu (công ty/knowledge) vào ngữ cảnh trả lời.
 const CONTEXT_MIN_SCORE = Number(process.env.RAG_CONTEXT_MIN_SCORE ?? 0.25);
-// Giới hạn tốc độ sinh: ít token hơn = phản hồi nhanh hơn.
-const MAX_OUTPUT_TOKENS = Number(process.env.GEMINI_MAX_OUTPUT_TOKENS ?? 600);
+const MAX_OUTPUT_TOKENS = Number(process.env.RAG_MAX_OUTPUT_TOKENS ?? 600);
 const NO_MATCH_ANSWER = 'Xin lỗi, mình chưa có thông tin phù hợp với yêu cầu của bạn.';
+
+const LEVEL_LABELS = {
+	beginner: 'Cơ bản',
+	intermediate: 'Trung cấp',
+	advanced: 'Nâng cao',
+};
 
 const SYSTEM_PROMPT = `Bạn là trợ lý tư vấn của cửa hàng nhạc cụ GuitarMaster.
 Trả lời bằng tiếng Việt, thân thiện, ngắn gọn và CHỈ dựa vào thông tin trong phần CONTEXT bên dưới.
 - Nếu câu hỏi về sản phẩm: ưu tiên đúng loại nhạc cụ và đúng khoảng ngân sách (nếu có); đề xuất tối đa 3 sản phẩm phù hợp nhất, nêu rõ tên và giá.
+- Nếu câu hỏi về sản phẩm bán chạy, rẻ nhất, đắt nhất, phù hợp người mới, đánh giá cao: trả lời đúng thứ tự và số lượng trong CONTEXT (không bịa thêm sản phẩm).
+- Nếu câu hỏi về khóa học guitar: giới thiệu khóa học phù hợp trình độ, nêu tên và cấp độ.
 - Nếu câu hỏi về cửa hàng (địa chỉ, hotline, chính sách...): trả lời dựa trên thông tin công ty trong CONTEXT.
 - Nếu không tìm thấy thông tin phù hợp trong CONTEXT, hãy nói: "Xin lỗi, mình chưa có thông tin phù hợp với yêu cầu của bạn."
 Tuyệt đối không bịa thông tin nằm ngoài CONTEXT.
@@ -47,20 +58,17 @@ Tuyệt đối không bịa thông tin nằm ngoài CONTEXT.
 CONTEXT:
 {context}`;
 
-// ===== Trạng thái dùng chung =====
 const state = {
 	embeddings: null,
 	vectorStore: null,
 	llm: null,
-	combineChainPromise: null, // cache chuỗi sinh câu trả lời
+	combineChainPromise: null,
 	ready: false,
-	building: null, // promise lock khi đang build index
+	building: null,
 };
 
-// Bộ nhớ hội thoại: sessionId -> mảng BaseMessage (ConversationBufferMemory)
 const histories = new Map();
 
-// ===== Tiện ích =====
 function toNumberSafe(value) {
 	if (typeof value === 'number' && Number.isFinite(value)) return value;
 	if (typeof value === 'string') {
@@ -85,29 +93,56 @@ function getEmbeddings() {
 	return state.embeddings;
 }
 
-function getLLM() {
-	if (state.llm) return state.llm;
+function createDeepSeekLLM() {
+	const apiKey = String(process.env.DEEPSEEK_API_KEY || '').trim();
+	if (!apiKey) return null;
+
+	const baseURL = String(process.env.DEEPSEEK_API_BASE_URL || 'https://api.deepseek.com/v1')
+		.trim()
+		.replace(/\/$/, '');
+
+	return new ChatOpenAI({
+		apiKey,
+		model: DEEPSEEK_CHAT_MODEL,
+		temperature: 0,
+		maxTokens: MAX_OUTPUT_TOKENS,
+		maxRetries: Number(process.env.DEEPSEEK_MAX_RETRIES ?? 1),
+		timeout: Number(process.env.DEEPSEEK_TIMEOUT_MS ?? 30000),
+		configuration: { baseURL },
+	});
+}
+
+function createGeminiLLM() {
 	const apiKey = String(
 		process.env.GEMINI_API_KEY ||
 			process.env.GOOGLE_AI_API_KEY ||
 			process.env.GOOGLE_API_KEY ||
 			'',
 	).trim();
-	if (!apiKey) return null; // không có key -> dùng fallback truy xuất
-	state.llm = new ChatGoogleGenerativeAI({
+	if (!apiKey) return null;
+
+	return new ChatGoogleGenerativeAI({
 		apiKey,
-		model: CHAT_MODEL,
+		model: GEMINI_CHAT_MODEL,
 		temperature: 0,
 		maxOutputTokens: MAX_OUTPUT_TOKENS,
-		// Fail nhanh khi Gemini lỗi/quá tải (429) -> chuyển fallback ngay,
-		// tránh SDK tự retry với backoff dài (có thể chờ ~90s).
 		maxRetries: Number(process.env.GEMINI_MAX_RETRIES ?? 0),
 		timeout: Number(process.env.GEMINI_TIMEOUT_MS ?? 20000),
 	});
+}
+
+function getLLM() {
+	if (state.llm) return state.llm;
+
+	if (RAG_LLM_PROVIDER === 'gemini') {
+		state.llm = createGeminiLLM() || createDeepSeekLLM();
+	} else {
+		state.llm = createDeepSeekLLM() || createGeminiLLM();
+	}
+
 	return state.llm;
 }
 
-// Chuỗi sinh câu trả lời (stuff documents) — tạo 1 lần rồi tái sử dụng.
 function getCombineChain() {
 	if (state.combineChainPromise) return state.combineChainPromise;
 	const llm = getLLM();
@@ -121,7 +156,6 @@ function getCombineChain() {
 	return state.combineChainPromise;
 }
 
-// ===== Indexing: chuẩn bị tài liệu =====
 async function buildProductDocuments() {
 	const products = await Product.find({ isActive: true })
 		.select('name description slug price brand category attributes')
@@ -156,6 +190,35 @@ async function buildProductDocuments() {
 				brandName,
 				categoryName,
 				type,
+			},
+		});
+	});
+}
+
+async function buildCourseDocuments() {
+	const courses = await Course.find({ isPublished: true })
+		.select('title description slug level tags')
+		.lean();
+
+	return courses.map((c) => {
+		const levelLabel = LEVEL_LABELS[c.level] || c.level || 'Cơ bản';
+		const content = [
+			`Khóa học: ${c.title}`,
+			c.description ? `Mô tả: ${c.description}` : '',
+			`Cấp độ: ${levelLabel}`,
+			c.tags?.length ? `Chủ đề: ${c.tags.join(', ')}` : '',
+			c.slug ? `Đường dẫn: /courses/${c.slug}` : '',
+		]
+			.filter(Boolean)
+			.join('\n');
+
+		return new Document({
+			pageContent: content,
+			metadata: {
+				kind: 'course',
+				slug: c.slug,
+				title: c.title,
+				level: c.level,
 			},
 		});
 	});
@@ -223,17 +286,17 @@ async function buildKnowledgeDocuments() {
 	return docs;
 }
 
-// ===== Indexing: build vector store FAISS =====
 export async function buildProductIndex() {
 	if (state.building) return state.building;
 
 	state.building = (async () => {
 		const embeddings = getEmbeddings();
-		const [productDocs, knowledgeDocs] = await Promise.all([
+		const [productDocs, courseDocs, knowledgeDocs] = await Promise.all([
 			buildProductDocuments(),
+			buildCourseDocuments(),
 			buildKnowledgeDocuments(),
 		]);
-		const docs = [...productDocs, ...knowledgeDocs];
+		const docs = [...productDocs, ...courseDocs, ...knowledgeDocs];
 		if (docs.length === 0) {
 			docs.push(
 				new Document({ pageContent: 'Chưa có dữ liệu.', metadata: { kind: 'empty' } }),
@@ -244,6 +307,7 @@ export async function buildProductIndex() {
 		return {
 			count: docs.length,
 			products: productDocs.length,
+			courses: courseDocs.length,
 			docs: knowledgeDocs.length,
 		};
 	})();
@@ -260,18 +324,14 @@ export function isIndexReady() {
 }
 
 export function invalidateProductIndex() {
-	// Đánh dấu index cần build lại ở lần truy vấn kế tiếp
 	state.ready = false;
 	state.vectorStore = null;
 }
 
-// FAISS dùng khoảng cách L2 trên vector đã chuẩn hoá: cosine = 1 - L2^2 / 2
 function l2ToCosine(distance) {
 	return 1 - (distance * distance) / 2;
 }
 
-// Một lần truy xuất duy nhất: trả về cả danh sách sản phẩm (đã lọc ngưỡng + ngân sách)
-// và các tài liệu ngữ cảnh để sinh câu trả lời. Không có gì liên quan -> rỗng.
 async function retrieveScored({ query, k, budgetMin, budgetMax }) {
 	const pairs = await state.vectorStore.similaritySearchWithScore(query, Math.max(k, 12));
 	const seen = new Set();
@@ -305,8 +365,7 @@ async function retrieveScored({ query, k, budgetMin, budgetMax }) {
 		}
 	}
 
-	// Giới hạn ngữ cảnh để giảm token -> phản hồi nhanh hơn
-	const context = [...productDocs.slice(0, 5), ...infoDocs.slice(0, 3)];
+	const context = [...productDocs.slice(0, 5), ...infoDocs.slice(0, 4)];
 	return { items, context };
 }
 
@@ -324,6 +383,10 @@ function saveHistory(sessionId, userText, botText) {
 	histories.set(sessionId, next);
 }
 
+export function clearHistory(sessionId) {
+	if (sessionId) histories.delete(sessionId);
+}
+
 function buildBudgetedInput(message, budgetMin, budgetMax) {
 	const parts = [];
 	if (Number.isFinite(budgetMin)) parts.push(`từ ${budgetMin.toLocaleString('vi-VN')}đ`);
@@ -331,8 +394,6 @@ function buildBudgetedInput(message, budgetMin, budgetMax) {
 	return parts.length ? `${message}\n(Ngân sách mong muốn: ${parts.join(' ')})` : message;
 }
 
-// Ghép câu hỏi gần nhất của người dùng vào truy vấn để câu hỏi nối tiếp
-// (vd: "rẻ hơn không?") vẫn truy xuất đúng ngữ cảnh — rẻ, không cần gọi LLM.
 function buildRetrievalQuery(input, chatHistory) {
 	const lastUser = [...(chatHistory || [])]
 		.reverse()
@@ -341,16 +402,43 @@ function buildRetrievalQuery(input, chatHistory) {
 	return prev ? `${prev} ${input}` : input;
 }
 
-// ===== Trả lời câu hỏi (Generation) =====
 export async function answerQuestion({ message, budgetMin, budgetMax, sessionId, k = 6 }) {
+	const input = buildBudgetedInput(message, budgetMin, budgetMax);
+	const chatHistory = getHistory(sessionId);
+
+	// Truy vấn có cấu trúc: bán chạy, rẻ/đắt nhất, người mới, đánh giá cao...
+	const structured = await runStructuredProductQuery({ message, budgetMin, budgetMax });
+	if (structured) {
+		const { items, context, queryType } = structured;
+		if (items.length === 0) {
+			const answer = formatStructuredAnswer(queryType, []);
+			saveHistory(sessionId, message, answer);
+			return { answer, items: [] };
+		}
+
+		const chainPromise = getCombineChain();
+		if (chainPromise) {
+			try {
+				const chain = await chainPromise;
+				const answer = (
+					await chain.invoke({ input, chat_history: chatHistory, context })
+				).trim();
+				saveHistory(sessionId, message, answer);
+				return { answer, items };
+			} catch (e) {
+				console.warn('[rag] LLM lỗi (structured), dùng template:', e?.message);
+			}
+		}
+
+		const answer = formatStructuredAnswer(queryType, items);
+		saveHistory(sessionId, message, answer);
+		return { answer, items };
+	}
+
 	if (!isIndexReady()) {
 		await buildProductIndex();
 	}
 
-	const input = buildBudgetedInput(message, budgetMin, budgetMax);
-	const chatHistory = getHistory(sessionId);
-
-	// Truy xuất MỘT lần: lấy cả sản phẩm gợi ý (đã lọc ngưỡng + ngân sách) lẫn ngữ cảnh.
 	const retrievalQuery = buildRetrievalQuery(input, chatHistory);
 	const { items, context } = await retrieveScored({
 		query: retrievalQuery,
@@ -359,7 +447,6 @@ export async function answerQuestion({ message, budgetMin, budgetMax, sessionId,
 		budgetMax,
 	});
 
-	// Không có gì liên quan (từ vô nghĩa / lạc đề) -> trả lời ngay, KHÔNG gọi Gemini.
 	if (context.length === 0) {
 		saveHistory(sessionId, message, NO_MATCH_ANSWER);
 		return { answer: NO_MATCH_ANSWER, items: [] };
@@ -375,11 +462,10 @@ export async function answerQuestion({ message, budgetMin, budgetMax, sessionId,
 			saveHistory(sessionId, message, answer);
 			return { answer, items };
 		} catch (e) {
-			console.warn('[rag] Gemini lỗi, dùng fallback truy xuất:', e?.message);
+			console.warn('[rag] LLM lỗi, dùng fallback truy xuất:', e?.message);
 		}
 	}
 
-	// Fallback khi không có Gemini API key hoặc chain lỗi: chỉ truy xuất + template
 	const answer = items.length
 		? 'Gợi ý một số sản phẩm phù hợp:\n' +
 		  items
