@@ -32,13 +32,16 @@ export async function emitDirectMessage({ senderId, recipientId, message }) {
 		recipientId: String(recipientId),
 	};
 
-	io.to(`user:${recipientId}`).emit('message:new', {
+	const recipientRoom = `user:${String(recipientId)}`;
+	const senderRoom = `user:${String(senderId)}`;
+
+	io.to(recipientRoom).emit('message:new', {
 		...base,
 		message: { id: message.id, text: message.text, fromMe: false, at: message.at },
 		peer: formatUser(sender),
 	});
 
-	io.to(`user:${senderId}`).emit('message:new', {
+	io.to(senderRoom).emit('message:new', {
 		...base,
 		message: { id: message.id, text: message.text, fromMe: true, at: message.at },
 		peer: formatUser(recipient),
