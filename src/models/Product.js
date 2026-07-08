@@ -20,18 +20,10 @@ const productSchema = new mongoose.Schema(
     ratingAverage: { type: Number, default: 0 },
     ratingCount: { type: Number, default: 0 },
     images: [imageSchema],
-    attributes: {
-      type: {
-        type: String,
-        enum: [
-          'guitar',
-        ],
-        default: 'guitar',
-      },
-      bodyMaterial: String,
-      strings: Number,
-      color: String,
-    },
+    attributes: { type: mongoose.Schema.Types.Mixed, default: {} },
+    videoUrl: String,
+    highlights: [String],
+    gifts: [String],
     price: {
       base: { type: Number, required: true, min: 0 },
       sale: { type: Number, min: 0 },
