@@ -150,3 +150,20 @@ export async function deleteUserService(userId) {
   return { message: 'User deleted successfully' };
 }
 
+export async function changeUserPasswordService(userId, newPassword) {
+  if (!newPassword || newPassword.length < 6) {
+    throw new Error('INVALID_PASSWORD');
+  }
+
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new Error('USER_NOT_FOUND');
+  }
+
+  user.password = newPassword;
+  user.markModified('password');
+  await user.save();
+
+  return { message: 'Đổi mật khẩu thành công' };
+}
+
