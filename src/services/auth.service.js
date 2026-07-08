@@ -59,10 +59,8 @@ export async function loginUser(identifier, password) {
 
   if (!user) throw new Error('INVALID_CREDENTIALS');
 
-  // Chỉ cho phép đăng nhập mật khẩu với tài khoản local
-  if (user.provider && user.provider !== 'local') {
-    throw new Error('INVALID_CREDENTIALS');
-  }
+  // Cho phép đăng nhập bằng mật khẩu nếu tài khoản đã có password
+  // (kể cả tài khoản từng đăng ký Google/Facebook rồi đặt lại mật khẩu)
   if (!user.password) {
     throw new Error('INVALID_CREDENTIALS');
   }
@@ -170,21 +168,20 @@ export async function verifyOTP(email, otp) {
 
 // Đặt lại mật khẩu với OTP
 export async function resetPassword(email, otp, newPassword) {
-  // Xác thực OTP trước
   await verifyOTP(email, otp);
 
-  // Tìm user và cập nhật mật khẩu
   const user = await User.findOne({ email: email.toLowerCase() });
   if (!user) {
     throw new Error('EMAIL_NOT_FOUND');
   }
 
   user.password = newPassword;
+  user.markModified('password');
   await user.save();
 
   return {
     success: true,
-    email: email.toLowerCase()
+    email: email.toLowerCase(),
   };
 }
 
@@ -216,6 +213,7 @@ export async function resetPasswordWithToken(token, newPassword) {
   }
 
   user.password = newPassword;
+  user.markModified('password');
   await user.save();
 
   // Xóa reset token
