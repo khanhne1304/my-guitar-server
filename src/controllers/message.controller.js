@@ -4,8 +4,10 @@ import {
   getMessages,
   sendMessage,
   getUnreadCount,
+  markThreadRead,
   currentUserId,
 } from '../services/message.service.js';
+import { emitDirectMessage } from '../services/messageRealtime.service.js';
 
 function handleMessageError(e, res, next) {
   if (e.status) {
@@ -49,6 +51,20 @@ export async function getThread(req, res, next) {
   }
 }
 
+export async function markThreadReadHandler(req, res, next) {
+  try {
+    const otherId = req.params.userId;
+    if (!mongoose.Types.ObjectId.isValid(otherId)) {
+      return res.status(400).json({ message: 'Invalid user id' });
+    }
+    const userId = currentUserId(req.user);
+    const result = await markThreadRead(userId, otherId);
+    res.json(result);
+  } catch (e) {
+    handleMessageError(e, res, next);
+  }
+}
+
 export async function postMessage(req, res, next) {
   try {
     const otherId = req.params.userId;
@@ -58,6 +74,11 @@ export async function postMessage(req, res, next) {
     const userId = currentUserId(req.user);
     const { text } = req.body || {};
     const message = await sendMessage(userId, otherId, text);
+    await emitDirectMessage({
+      senderId: userId,
+      recipientId: otherId,
+      message,
+    });
     res.status(201).json({ message });
   } catch (e) {
     handleMessageError(e, res, next);
