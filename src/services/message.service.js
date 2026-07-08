@@ -143,4 +143,17 @@ export async function getUnreadCount(userId) {
   return DirectMessage.countDocuments({ recipient: me, readAt: null });
 }
 
+export async function markThreadRead(userId, otherUserId) {
+  if (!(await areFriends(userId, otherUserId))) {
+    throw Object.assign(new Error('Chỉ có thể nhắn tin với bạn bè'), { status: 403 });
+  }
+  const me = oid(userId);
+  const other = oid(otherUserId);
+  await DirectMessage.updateMany(
+    { sender: other, recipient: me, readAt: null },
+    { $set: { readAt: new Date() } },
+  );
+  return { ok: true };
+}
+
 export { currentUserId };
