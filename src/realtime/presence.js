@@ -19,7 +19,8 @@ export function registerPresence(io) {
       if (!token) return next(new Error('UNAUTHORIZED'));
       if (!process.env.JWT_SECRET) return next(new Error('JWT_SECRET_NOT_SET'));
       const payload = jwt.verify(token, process.env.JWT_SECRET);
-      socket.data.userId = payload?.id;
+      const uid = payload?.id ?? payload?._id ?? payload?.userId;
+      socket.data.userId = uid != null ? String(uid) : null;
       return next();
     } catch (e) {
       return next(new Error('UNAUTHORIZED'));
