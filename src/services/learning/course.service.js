@@ -189,6 +189,23 @@ export async function listMyCourses(userId) {
   return out;
 }
 
+export async function listAllCoursesForAdmin() {
+  const courses = await Course.find({}).sort({ updatedAt: -1 }).lean();
+  const out = [];
+  for (const c of courses) {
+    const moduleCount = await Module.countDocuments({ courseId: c._id });
+    const lessonCount = await countLessonsInCourse(c._id);
+    const creator = await creatorInfo(c.createdBy);
+    out.push({
+      ...mapCourseBase(c),
+      moduleCount,
+      lessonCount,
+      creator,
+    });
+  }
+  return out;
+}
+
 export async function getCourseDetail(courseId, viewer, { includeQuizAnswers = false } = {}) {
   const course = await Course.findById(courseId).lean();
   if (!course || !canReadCourse(course, viewer)) {
@@ -241,12 +258,17 @@ export async function updateCourse(user, courseId, body) {
   const course = await Course.findById(courseId);
   assertCourseOwner(course, user);
   const allowed = ['title', 'description', 'thumbnail', 'level', 'tags'];
+  if (user.role === 'admin') {
+    allowed.push('isPublished');
+  }
   for (const k of allowed) {
     if (body[k] === undefined) continue;
     if (k === 'tags') {
       course.tags = Array.isArray(body.tags) ? body.tags.map((t) => String(t).trim()).filter(Boolean) : [];
     } else if (k === 'level') {
       course.level = ['beginner', 'intermediate', 'advanced'].includes(body.level) ? body.level : course.level;
+    } else if (k === 'isPublished') {
+      course.isPublished = Boolean(body.isPublished);
     } else {
       course[k] = typeof body[k] === 'string' ? body[k].trim() : body[k];
     }
