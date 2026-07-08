@@ -2,7 +2,8 @@ import {
   listUsersService,
   createUserService,
   updateUserService,
-  deleteUserService
+  deleteUserService,
+  changeUserPasswordService,
 } from '../services/adminUser.service.js';
 
 export async function listUsers(req, res, next) {
@@ -90,6 +91,33 @@ export async function deleteUser(req, res, next) {
   } catch (error) {
     if (error.message === 'USER_NOT_FOUND') {
       return res.status(404).json({ message: 'Không tìm thấy người dùng' });
+    }
+    next(error);
+  }
+}
+
+export async function changeUserPassword(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { newPassword } = req.body;
+    const requesterId = String(req.user._id || req.user.id);
+
+    if (requesterId !== String(id)) {
+      return res.status(403).json({ message: 'Bạn chỉ có thể đổi mật khẩu của chính mình' });
+    }
+
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ message: 'Mật khẩu phải có ít nhất 6 ký tự' });
+    }
+
+    const result = await changeUserPasswordService(id, newPassword);
+    res.json(result);
+  } catch (error) {
+    if (error.message === 'USER_NOT_FOUND') {
+      return res.status(404).json({ message: 'Không tìm thấy người dùng' });
+    }
+    if (error.message === 'INVALID_PASSWORD') {
+      return res.status(400).json({ message: 'Mật khẩu phải có ít nhất 6 ký tự' });
     }
     next(error);
   }

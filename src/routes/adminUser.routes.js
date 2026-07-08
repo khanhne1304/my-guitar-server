@@ -4,7 +4,8 @@ import {
   listUsers,
   createUser,
   updateUser,
-  deleteUser
+  deleteUser,
+  changeUserPassword,
 } from '../controllers/adminUser.controller.js';
 
 const router = Router();
@@ -18,6 +19,9 @@ router.get('/', listUsers);
 
 // POST /api/admin/users - Tạo user mới
 router.post('/', createUser);
+
+// PUT /api/admin/users/:id/password - Admin đổi mật khẩu của chính mình
+router.put('/:id/password', changeUserPassword);
 
 // PUT /api/admin/users/:id - Cập nhật user
 router.put('/:id', updateUser);
