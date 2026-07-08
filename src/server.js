@@ -103,6 +103,7 @@ import dashboardRoutes from './routes/dashboard.routes.js';
 import messageRoutes from './routes/message.routes.js';
 import bannerRoutes from './routes/banner.routes.js';
 import adminBannerRoutes from './routes/adminBanner.routes.js';
+import adminCourseRoutes from './routes/adminCourse.routes.js';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
@@ -143,6 +144,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/banners', bannerRoutes);
 app.use('/api/admin/banners', adminBannerRoutes);
+app.use('/api/admin/courses', adminCourseRoutes);
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
 /** --------- ERRORS --------- **/
