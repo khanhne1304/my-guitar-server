@@ -197,6 +197,47 @@ function parseChordLyricLine(lineHtml) {
   };
 }
 
+function extractChordsData(html) {
+  const marker = 'window.CHORDS_DATA = ';
+  const start = html.indexOf(marker);
+  if (start < 0) return {};
+
+  let i = start + marker.length;
+  while (i < html.length && html[i] !== '{') i += 1;
+  if (i >= html.length) return {};
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  const begin = i;
+
+  for (; i < html.length; i += 1) {
+    const ch = html[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '{') depth += 1;
+    if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          return JSON.parse(html.slice(begin, i + 1));
+        } catch {
+          return {};
+        }
+      }
+    }
+  }
+  return {};
+}
+
 function parseSongHtml(html, sourceUrl) {
   const titleMatch = html.match(/<h1 id="song-title">[\s\S]*?<span>([^<]+)<\/span>/i);
   const title = decodeHtml(titleMatch?.[1] || '');
@@ -246,6 +287,7 @@ function parseSongHtml(html, sourceUrl) {
   }
 
   const songId = extractSongIdFromUrl(sourceUrl);
+  const chordsData = extractChordsData(html);
 
   return {
     id: songId,
@@ -259,6 +301,7 @@ function parseSongHtml(html, sourceUrl) {
     chords,
     progression,
     lines,
+    chordsData,
     url: sourceUrl,
     source: 'hopamchuan',
   };
