@@ -173,15 +173,22 @@ async function startServer() {
 
     server.listen(PORT, () => {
       console.log('🚀 API on :' + PORT);
-      // Warm-up chatbot RAG (tải model embedding + build FAISS index) chạy nền
-      // để câu hỏi đầu tiên phản hồi nhanh. Không chặn quá trình khởi động.
-      import('./services/rag.service.js')
-        .then(({ buildProductIndex }) =>
-          buildProductIndex()
-            .then((m) => console.log('🤖 RAG index sẵn sàng:', m))
-            .catch((e) => console.warn('⚠️ RAG warm-up lỗi:', e?.message)),
-        )
-        .catch(() => {});
+      // Warm-up RAG tốn RAM (Xenova + FAISS). Trên Render free (512MB) nên tắt;
+      // index sẽ build lazy khi có request /api/chat. Bật lại: RAG_WARMUP_ON_START=true
+      const ragWarmup =
+        process.env.RAG_WARMUP_ON_START === 'true' &&
+        process.env.RAG_DISABLE !== 'true';
+      if (ragWarmup) {
+        import('./services/rag.service.js')
+          .then(({ buildProductIndex }) =>
+            buildProductIndex()
+              .then((m) => console.log('🤖 RAG index sẵn sàng:', m))
+              .catch((e) => console.warn('⚠️ RAG warm-up lỗi:', e?.message)),
+          )
+          .catch(() => {});
+      } else {
+        console.log('ℹ️ RAG warm-up tắt (tiết kiệm RAM). Set RAG_WARMUP_ON_START=true để bật.');
+      }
     });
 
     // Xử lý lỗi khi server không thể lắng nghe
