@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 
 import Product from '../models/Product.js';
 import Course from '../models/Course.js';
-import { companyInfo } from '../data/companyInfo.js';
+import { companyInfo, isCompanyQuery, answerCompanyQuestion } from '../data/companyInfo.js';
 
 import { HuggingFaceTransformersEmbeddings } from '@langchain/community/embeddings/hf_transformers';
 import { FaissStore } from '@langchain/community/vectorstores/faiss';
@@ -23,6 +23,7 @@ import { createStuffDocumentsChain } from 'langchain/chains/combine_documents';
 import {
 	runStructuredProductQuery,
 	formatStructuredAnswer,
+	shouldSuggestProducts,
 } from './chatProductQuery.service.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -69,6 +70,11 @@ const state = {
 
 const histories = new Map();
 
+/**
+ * Chuyển giá trị sang số an toàn (hỗ trợ chuỗi có ký tự không phải số).
+ * @param {number|string} value - Giá trị cần chuyển
+ * @returns {number|null} Số hợp lệ hoặc null
+ */
 function toNumberSafe(value) {
 	if (typeof value === 'number' && Number.isFinite(value)) return value;
 	if (typeof value === 'string') {
@@ -80,6 +86,11 @@ function toNumberSafe(value) {
 	return null;
 }
 
+/**
+ * Lấy giá hiệu lực của sản phẩm (ưu tiên sale, fallback base).
+ * @param {Object} price - Đối tượng giá { base, sale }
+ * @returns {number|null} Giá hiệu lực hoặc null
+ */
 function effectivePrice(price) {
 	if (!price) return null;
 	const baseNum = toNumberSafe(price.base);
@@ -87,12 +98,20 @@ function effectivePrice(price) {
 	return saleNum ?? baseNum;
 }
 
+/**
+ * Khởi tạo hoặc trả về instance HuggingFace embeddings (singleton).
+ * @returns {HuggingFaceTransformersEmbeddings} Model embedding cho vector store
+ */
 function getEmbeddings() {
 	if (state.embeddings) return state.embeddings;
 	state.embeddings = new HuggingFaceTransformersEmbeddings({ model: EMBEDDING_MODEL });
 	return state.embeddings;
 }
 
+/**
+ * Tạo LLM ChatOpenAI kết nối DeepSeek API.
+ * @returns {ChatOpenAI|null} Instance LLM hoặc null nếu thiếu API key
+ */
 function createDeepSeekLLM() {
 	const apiKey = String(process.env.DEEPSEEK_API_KEY || '').trim();
 	if (!apiKey) return null;
@@ -112,6 +131,10 @@ function createDeepSeekLLM() {
 	});
 }
 
+/**
+ * Tạo LLM ChatGoogleGenerativeAI kết nối Gemini API.
+ * @returns {ChatGoogleGenerativeAI|null} Instance LLM hoặc null nếu thiếu API key
+ */
 function createGeminiLLM() {
 	const apiKey = String(
 		process.env.GEMINI_API_KEY ||
@@ -131,6 +154,10 @@ function createGeminiLLM() {
 	});
 }
 
+/**
+ * Lấy LLM đang dùng theo RAG_LLM_PROVIDER (DeepSeek hoặc Gemini, có fallback).
+ * @returns {ChatOpenAI|ChatGoogleGenerativeAI|null} Instance LLM hoặc null
+ */
 function getLLM() {
 	if (state.llm) return state.llm;
 
@@ -143,6 +170,10 @@ function getLLM() {
 	return state.llm;
 }
 
+/**
+ * Tạo hoặc trả về promise chain kết hợp tài liệu + LLM (singleton).
+ * @returns {Promise|null} Promise của combine documents chain hoặc null nếu không có LLM
+ */
 function getCombineChain() {
 	if (state.combineChainPromise) return state.combineChainPromise;
 	const llm = getLLM();
@@ -156,6 +187,10 @@ function getCombineChain() {
 	return state.combineChainPromise;
 }
 
+/**
+ * Xây dựng LangChain Documents từ sản phẩm active trong MongoDB.
+ * @returns {Promise<Array<Document>>} Mảng document sản phẩm cho vector index
+ */
 async function buildProductDocuments() {
 	const products = await Product.find({ isActive: true })
 		.select('name description slug price brand category attributes')
@@ -195,6 +230,10 @@ async function buildProductDocuments() {
 	});
 }
 
+/**
+ * Xây dựng LangChain Documents từ khóa học đã publish.
+ * @returns {Promise<Array<Document>>} Mảng document khóa học cho vector index
+ */
 async function buildCourseDocuments() {
 	const courses = await Course.find({ isPublished: true })
 		.select('title description slug level tags')
@@ -224,6 +263,10 @@ async function buildCourseDocuments() {
 	});
 }
 
+/**
+ * Tạo nội dung văn bản thông tin công ty từ companyInfo.
+ * @returns {string} Văn bản mô tả công ty, liên hệ, chính sách
+ */
 function companyDocText() {
 	const c = companyInfo;
 	return [
@@ -248,6 +291,10 @@ function companyDocText() {
 	].join('\n');
 }
 
+/**
+ * Nạp tài liệu tri thức: thông tin công ty + file .txt/.md trong knowledge dir.
+ * @returns {Promise<Array<Document>>} Mảng document tri thức đã chunk
+ */
 async function buildKnowledgeDocuments() {
 	const docs = [
 		new Document({
@@ -286,6 +333,10 @@ async function buildKnowledgeDocuments() {
 	return docs;
 }
 
+/**
+ * Xây dựng hoặc rebuild FAISS vector index từ sản phẩm, khóa học và tài liệu.
+ * @returns {Promise<Object>} Thống kê số lượng document đã index
+ */
 export async function buildProductIndex() {
 	if (state.building) return state.building;
 
@@ -319,20 +370,42 @@ export async function buildProductIndex() {
 	}
 }
 
+/**
+ * Kiểm tra vector index đã sẵn sàng cho truy xuất hay chưa.
+ * @returns {boolean} true nếu index đã build xong
+ */
 export function isIndexReady() {
 	return state.ready && !!state.vectorStore;
 }
 
+/**
+ * Vô hiệu hóa index hiện tại (cần rebuild sau khi dữ liệu thay đổi).
+ * @returns {void}
+ */
 export function invalidateProductIndex() {
 	state.ready = false;
 	state.vectorStore = null;
 }
 
+/**
+ * Chuyển khoảng cách L2 sang độ tương đồng cosine (0–1).
+ * @param {number} distance - Khoảng cách L2 từ FAISS
+ * @returns {number} Độ tương đồng cosine
+ */
 function l2ToCosine(distance) {
 	return 1 - (distance * distance) / 2;
 }
 
-async function retrieveScored({ query, k, budgetMin, budgetMax }) {
+/**
+ * Truy xuất sản phẩm và tài liệu liên quan từ vector store có chấm điểm.
+ * @param {Object} params - Tham số truy xuất
+ * @param {string} params.query - Câu truy vấn
+ * @param {number} params.k - Số kết quả similarity search
+ * @param {number} [params.budgetMin] - Lọc giá tối thiểu
+ * @param {number} [params.budgetMax] - Lọc giá tối đa
+ * @returns {Promise<Object>} { items, context } — sản phẩm và documents cho LLM
+ */
+async function retrieveScored({ query, k, budgetMin, budgetMax, includeProducts = true }) {
 	const pairs = await state.vectorStore.similaritySearchWithScore(query, Math.max(k, 12));
 	const seen = new Set();
 	const items = [];
@@ -343,6 +416,7 @@ async function retrieveScored({ query, k, budgetMin, budgetMax }) {
 		const m = doc.metadata || {};
 		const cos = l2ToCosine(distance);
 		if (m.kind === 'product') {
+			if (!includeProducts) continue;
 			if (cos < MIN_PRODUCT_SCORE) continue;
 			const price = m.price;
 			if (Number.isFinite(budgetMin) && price != null && price < budgetMin) continue;
@@ -369,11 +443,23 @@ async function retrieveScored({ query, k, budgetMin, budgetMax }) {
 	return { items, context };
 }
 
+/**
+ * Lấy lịch sử hội thoại của phiên chat theo sessionId.
+ * @param {string} sessionId - ID phiên chat
+ * @returns {Array} Mảng HumanMessage/AIMessage
+ */
 function getHistory(sessionId) {
 	if (!sessionId) return [];
 	return histories.get(sessionId) || [];
 }
 
+/**
+ * Lưu tin nhắn mới vào lịch sử hội thoại (giới hạn MAX_HISTORY_TURNS).
+ * @param {string} sessionId - ID phiên chat
+ * @param {string} userText - Tin nhắn người dùng
+ * @param {string} botText - Câu trả lời bot
+ * @returns {void}
+ */
 function saveHistory(sessionId, userText, botText) {
 	if (!sessionId) return;
 	const prev = histories.get(sessionId) || [];
@@ -383,10 +469,22 @@ function saveHistory(sessionId, userText, botText) {
 	histories.set(sessionId, next);
 }
 
+/**
+ * Xóa lịch sử hội thoại của một phiên chat.
+ * @param {string} sessionId - ID phiên chat cần xóa
+ * @returns {void}
+ */
 export function clearHistory(sessionId) {
 	if (sessionId) histories.delete(sessionId);
 }
 
+/**
+ * Bổ sung thông tin ngân sách vào câu hỏi nếu có budgetMin/budgetMax.
+ * @param {string} message - Câu hỏi gốc
+ * @param {number} budgetMin - Ngân sách tối thiểu
+ * @param {number} budgetMax - Ngân sách tối đa
+ * @returns {string} Câu hỏi đã bổ sung ngữ cảnh ngân sách
+ */
 function buildBudgetedInput(message, budgetMin, budgetMax) {
 	const parts = [];
 	if (Number.isFinite(budgetMin)) parts.push(`từ ${budgetMin.toLocaleString('vi-VN')}đ`);
@@ -394,6 +492,12 @@ function buildBudgetedInput(message, budgetMin, budgetMax) {
 	return parts.length ? `${message}\n(Ngân sách mong muốn: ${parts.join(' ')})` : message;
 }
 
+/**
+ * Ghép câu hỏi hiện tại với tin nhắn user trước đó để cải thiện retrieval.
+ * @param {string} input - Câu hỏi hiện tại
+ * @param {Array} chatHistory - Lịch sử hội thoại
+ * @returns {string} Câu truy vấn retrieval đã mở rộng ngữ cảnh
+ */
 function buildRetrievalQuery(input, chatHistory) {
 	const lastUser = [...(chatHistory || [])]
 		.reverse()
@@ -402,12 +506,33 @@ function buildRetrievalQuery(input, chatHistory) {
 	return prev ? `${prev} ${input}` : input;
 }
 
+/**
+ * Trả lời câu hỏi người dùng qua RAG: truy vấn có cấu trúc hoặc similarity search + LLM.
+ * @param {Object} params - Tham số hỏi đáp
+ * @param {string} params.message - Câu hỏi người dùng
+ * @param {number} [params.budgetMin] - Ngân sách tối thiểu
+ * @param {number} [params.budgetMax] - Ngân sách tối đa
+ * @param {string} [params.sessionId] - ID phiên chat (lưu lịch sử)
+ * @param {number} [params.k=6] - Số kết quả similarity search
+ * @returns {Promise<Object>} { answer, items } — câu trả lời và sản phẩm gợi ý
+ */
 export async function answerQuestion({ message, budgetMin, budgetMax, sessionId, k = 6 }) {
+	const suggestProducts = shouldSuggestProducts(message);
+
+	// Câu hỏi về công ty/chính sách — trả lời trực tiếp, không gợi ý sản phẩm
+	if (isCompanyQuery(message)) {
+		const answer = answerCompanyQuestion(message);
+		saveHistory(sessionId, message, answer);
+		return { answer, items: [] };
+	}
+
 	const input = buildBudgetedInput(message, budgetMin, budgetMax);
 	const chatHistory = getHistory(sessionId);
 
 	// Truy vấn có cấu trúc: bán chạy, rẻ/đắt nhất, người mới, đánh giá cao...
-	const structured = await runStructuredProductQuery({ message, budgetMin, budgetMax });
+	const structured = suggestProducts
+		? await runStructuredProductQuery({ message, budgetMin, budgetMax })
+		: null;
 	if (structured) {
 		const { items, context, queryType } = structured;
 		if (items.length === 0) {
@@ -445,12 +570,15 @@ export async function answerQuestion({ message, budgetMin, budgetMax, sessionId,
 		k,
 		budgetMin,
 		budgetMax,
+		includeProducts: suggestProducts,
 	});
 
 	if (context.length === 0) {
 		saveHistory(sessionId, message, NO_MATCH_ANSWER);
 		return { answer: NO_MATCH_ANSWER, items: [] };
 	}
+
+	const responseItems = suggestProducts ? items : [];
 
 	const chainPromise = getCombineChain();
 	if (chainPromise) {
@@ -460,15 +588,15 @@ export async function answerQuestion({ message, budgetMin, budgetMax, sessionId,
 				await chain.invoke({ input, chat_history: chatHistory, context })
 			).trim();
 			saveHistory(sessionId, message, answer);
-			return { answer, items };
+			return { answer, items: responseItems };
 		} catch (e) {
 			console.warn('[rag] LLM lỗi, dùng fallback truy xuất:', e?.message);
 		}
 	}
 
-	const answer = items.length
+	const answer = responseItems.length
 		? 'Gợi ý một số sản phẩm phù hợp:\n' +
-		  items
+		  responseItems
 				.slice(0, 3)
 				.map(
 					(p, i) =>
@@ -479,5 +607,5 @@ export async function answerQuestion({ message, budgetMin, budgetMax, sessionId,
 				.join('\n')
 		: NO_MATCH_ANSWER;
 	saveHistory(sessionId, message, answer);
-	return { answer, items };
+	return { answer, items: responseItems };
 }
